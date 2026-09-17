@@ -138,13 +138,15 @@ per-record failure isolation, and the full CLI via spawned processes.
 - **Self-contained records**: the output carries the alert's identifying
   fields, so a downstream tool needs no join back to the input.
 
-## Fixtures and smoke test
+## Smoke test
 
-`fixtures/alerts.jsonl` — 8 realistic alerts (encoded PowerShell, LSASS access,
-RDP brute-force-then-success, sanctioned maintenance, authorized scanner, DLP
-exfil, new admin account, temp-path rundll32) covering every disposition.
+No alert data ships with this repo — alert corpora stay local, and the
+`fixtures/` directory is gitignored. Supply your own JSONL.
 
-Live smoke run, `gemma4:e2b` on an RPi5 (2 jobs, 8/8 records ok, 567 s):
+The initial smoke test used 8 synthetic alerts covering every disposition
+(encoded PowerShell, LSASS access, RDP brute-force-then-success, sanctioned
+maintenance, authorized scanner, DLP exfil, new admin account, temp-path
+rundll32). Results, `gemma4:e2b` on an RPi5 (2 jobs, 8/8 records ok, 567 s):
 
 | Alert | Expected | Got | Verdict |
 |---|---|---|---|
@@ -162,7 +164,8 @@ conservative (flag for investigation instead of closing or escalating), none
 dismissed malicious activity. This is uncalibrated local-model behavior; the
 gaps (contextual evidence weighting) are exactly what a calibrated model and
 a prompt/tuning pass are for. The point of this pipeline is to measure that —
-the same fixtures run unchanged against Jev when access lands.
+re-running the same private corpus against Jev when access lands is the
+calibration benchmark.
 
 Note: small local models take ~100 s/alert on the Pi's CPU. For quick
 iteration use `--backend mock`; for real analysis use a bigger box or a

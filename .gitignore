@@ -1,1 +1,10 @@
 /target
+
+# local alert corpora — never commit alert data (real or synthetic)
+/fixtures/
+
+# secrets — never commit
+.env
+.env.*
+*.key
+*.pem
