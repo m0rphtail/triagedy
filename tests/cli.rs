@@ -108,6 +108,63 @@ fn doctor_mock_succeeds() {
 }
 
 #[test]
+fn ollama_without_a_model_is_a_config_error() {
+    // No model is baked into the binary: the caller picks one, by flag or env.
+    let out = Command::new(triagedy_bin())
+        .args(["run", "--backend", "ollama"])
+        .env_remove("TRIAGEDY_MODEL")
+        .output()
+        .expect("run");
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no model selected"), "stderr was: {stderr}");
+}
+
+#[test]
+fn ollama_model_can_come_from_the_environment() {
+    // TRIAGEDY_MODEL is honored: the run gets past model resolution and fails
+    // at the transport instead (port 1 on loopback is closed), which is the
+    // proof that a model name was accepted without any model being pinned.
+    let out = Command::new(triagedy_bin())
+        .args([
+            "run",
+            "--backend",
+            "ollama",
+            "--ollama-url",
+            "http://127.0.0.1:1",
+            "--quiet",
+        ])
+        .env("TRIAGEDY_MODEL", "any-model-local-or-cloud")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|mut c| {
+            c.stdin
+                .take()
+                .expect("stdin")
+                .write_all(b"{\"id\":\"A-1\"}\n")?;
+            c.wait_with_output()
+        })
+        .expect("run");
+    // One alert, one failed record: the run reached the transport, so the
+    // model name was accepted — and the record echoes back which model ran.
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let record: serde_json::Value =
+        serde_json::from_str(stdout.lines().next().expect("one record")).expect("valid JSON");
+    assert_eq!(record["ok"], false);
+    assert_eq!(record["model"], "any-model-local-or-cloud");
+    assert!(
+        record["error"]
+            .as_str()
+            .expect("error string")
+            .contains("ollama"),
+        "record was: {record}"
+    );
+}
+
+#[test]
 fn unknown_backend_is_a_config_error() {
     let out = Command::new(triagedy_bin())
         .args(["run", "--backend", "nope"])

@@ -52,7 +52,9 @@ struct BackendArgs {
     /// Backend to use
     #[arg(long, default_value = "ollama", value_name = "mock|ollama|jev")]
     backend: String,
-    /// Model name (defaults: qwen3.5:latest for ollama, jev-latest for jev)
+    /// Model name — whatever the backend serves: a local Ollama model sized to
+    /// this machine, an Ollama cloud model, or the Jev model. Falls back to the
+    /// TRIAGEDY_MODEL environment variable; no model is baked in.
     #[arg(long)]
     model: Option<String>,
     /// Ollama base URL
@@ -93,21 +95,35 @@ struct DoctorArgs {
     backend: BackendArgs,
 }
 
-fn resolve_model(args: &BackendArgs, kind: BackendKind) -> String {
-    match &args.model {
-        Some(m) => m.clone(),
-        None => match kind {
-            BackendKind::Mock => "mock".to_string(),
-            BackendKind::Ollama => "qwen3.5:latest".to_string(),
-            BackendKind::Jev => "jev-latest".to_string(),
-        },
+/// Resolve the model name. Nothing is pinned here on purpose: triagedy drives
+/// whatever the backend serves — a local Ollama model that fits the machine, an
+/// Ollama cloud model, or the Jev model — so the choice stays with the caller.
+/// Resolution order: `--model`, then `$TRIAGEDY_MODEL`, then a backend default
+/// where one exists (mock has no model; Jev has its service name).
+fn resolve_model(args: &BackendArgs, kind: BackendKind) -> Result<String, String> {
+    if let Some(model) = &args.model {
+        return Ok(model.clone());
+    }
+    if let Ok(model) = std::env::var("TRIAGEDY_MODEL")
+        && !model.trim().is_empty()
+    {
+        return Ok(model);
+    }
+    match kind {
+        BackendKind::Mock => Ok("mock".to_string()),
+        BackendKind::Jev => Ok("jev-latest".to_string()),
+        BackendKind::Ollama => Err(
+            "no model selected: pass --model <name> — any model the Ollama server serves, \
+             local or cloud — or set TRIAGEDY_MODEL (`ollama list` shows local models)"
+                .to_string(),
+        ),
     }
 }
 
-fn backend_config(args: &BackendArgs, kind: BackendKind) -> BackendConfig {
-    BackendConfig {
+fn backend_config(args: &BackendArgs, kind: BackendKind) -> Result<BackendConfig, String> {
+    Ok(BackendConfig {
         kind,
-        model: resolve_model(args, kind),
+        model: resolve_model(args, kind)?,
         ollama_url: args.ollama_url.clone(),
         typesafe_url: args.typesafe_url.clone(),
         api_key: args
@@ -115,7 +131,7 @@ fn backend_config(args: &BackendArgs, kind: BackendKind) -> BackendConfig {
             .clone()
             .or_else(|| std::env::var("TYPESAFE_API_KEY").ok()),
         timeout_secs: args.timeout_secs,
-    }
+    })
 }
 
 #[tokio::main]
@@ -140,7 +156,7 @@ async fn run(cli: Cli) -> anyhow::Result<i32> {
 
 async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
     let kind = BackendKind::parse(&args.backend.backend).map_err(|e| anyhow!(e))?;
-    let cfg = backend_config(&args.backend, kind);
+    let cfg = backend_config(&args.backend, kind).map_err(|e| anyhow!(e))?;
     let backend = Backends::from_config(&cfg).map_err(|e| anyhow!(e))?;
     let model = cfg.model.clone();
 
@@ -178,7 +194,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
 
 async fn cmd_doctor(args: DoctorArgs) -> anyhow::Result<i32> {
     let kind = BackendKind::parse(&args.backend.backend).map_err(|e| anyhow!(e))?;
-    let cfg = backend_config(&args.backend, kind);
+    let cfg = backend_config(&args.backend, kind).map_err(|e| anyhow!(e))?;
 
     let lines: Result<Vec<String>, String> = match kind {
         BackendKind::Mock => Ok(vec![

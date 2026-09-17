@@ -59,8 +59,9 @@ impl OllamaBackend {
             "prompt": prompt,
             "stream": false,
             "format": self.schema,
-            // Thinking models (e.g. qwen3.5) route their whole reply into the
-            // `thinking` field unless disabled, leaving `response` empty.
+            // Thinking-capable models route their whole reply into the
+            // `thinking` field unless disabled, leaving `response` empty. Both
+            // fields are handled below, so either kind of model works here.
             "think": false,
             "options": { "temperature": 0.0 },
         });
