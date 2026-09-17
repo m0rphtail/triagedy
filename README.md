@@ -1,5 +1,7 @@
 # triage
 
+![ci](https://github.com/m0rphtail/triage/actions/workflows/ci.yml/badge.svg)
+
 Alert triage as a UNIX filter: **JSONL alerts in, typed decisions out.**
 
 One binary. No daemon, no database, no framework. Pipe it, host it, cron it.
