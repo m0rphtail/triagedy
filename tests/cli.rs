@@ -4,18 +4,18 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-fn triage_bin() -> &'static str {
-    env!("CARGO_BIN_EXE_triage")
+fn triagedy_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_triagedy")
 }
 
 fn run_cli(args: &[&str], stdin: &str) -> (Option<i32>, String, String) {
-    let mut child = Command::new(triage_bin())
+    let mut child = Command::new(triagedy_bin())
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn triage");
+        .expect("spawn triagedy");
     child
         .stdin
         .as_mut()
@@ -99,7 +99,7 @@ fn output_order_matches_input_order_with_parallel_workers() {
 
 #[test]
 fn doctor_mock_succeeds() {
-    let out = Command::new(triage_bin())
+    let out = Command::new(triagedy_bin())
         .args(["doctor", "--backend", "mock"])
         .output()
         .expect("run doctor");
@@ -109,7 +109,7 @@ fn doctor_mock_succeeds() {
 
 #[test]
 fn unknown_backend_is_a_config_error() {
-    let out = Command::new(triage_bin())
+    let out = Command::new(triagedy_bin())
         .args(["run", "--backend", "nope"])
         .output()
         .expect("run");

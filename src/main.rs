@@ -1,4 +1,4 @@
-//! triage — alert triage as a UNIX filter.
+//! triagedy — alert triage as a UNIX filter.
 //!
 //! JSONL alerts in, typed decisions out. The decision shape (Choice / Score /
 //! Noul with calibrated confidence) mirrors TypeSafe's System One primitives,
@@ -24,7 +24,7 @@ use std::time::Instant;
 
 #[derive(Parser)]
 #[command(
-    name = "triage",
+    name = "triagedy",
     version,
     about = "Alert triage as a UNIX filter: JSONL alerts in, typed decisions out.",
     long_about = "Reads one security alert per line, asks a decision backend for a typed \
@@ -124,7 +124,7 @@ async fn main() {
     let code = match run(cli).await {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("triage: error: {e:#}");
+            eprintln!("triagedy: error: {e:#}");
             2
         }
     };
@@ -163,7 +163,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
 
     if !args.quiet {
         eprintln!(
-            "triage: {} records, {} ok, {} failed in {:.1}s (backend {}, model {})",
+            "triagedy: {} records, {} ok, {} failed in {:.1}s (backend {}, model {})",
             stats.total,
             stats.ok,
             stats.failed,
@@ -183,7 +183,7 @@ async fn cmd_doctor(args: DoctorArgs) -> anyhow::Result<i32> {
     let lines: Result<Vec<String>, String> = match kind {
         BackendKind::Mock => Ok(vec![
             "mock backend: offline and deterministic; nothing to check".to_string(),
-            "usage: triage run --backend mock < alerts.jsonl".to_string(),
+            "usage: triagedy run --backend mock < alerts.jsonl".to_string(),
         ]),
         BackendKind::Ollama => backends::ollama::doctor(&cfg).await,
         BackendKind::Jev => backends::jev::doctor(&cfg).await,
@@ -197,7 +197,7 @@ async fn cmd_doctor(args: DoctorArgs) -> anyhow::Result<i32> {
             Ok(0)
         }
         Err(e) => {
-            eprintln!("triage doctor: FAIL: {e}");
+            eprintln!("triagedy doctor: FAIL: {e}");
             Ok(1)
         }
     }

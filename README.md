@@ -1,13 +1,15 @@
-# triage
+# triagedy
 
-![ci](https://github.com/m0rphtail/triage/actions/workflows/ci.yml/badge.svg)
+> Because alert triage shouldn't be a tragedy.
+
+![ci](https://github.com/m0rphtail/triagedy/actions/workflows/ci.yml/badge.svg)
 
 Alert triage as a UNIX filter: **JSONL alerts in, typed decisions out.**
 
 One binary. No daemon, no database, no framework. Pipe it, host it, cron it.
 
 ```
-cat alerts.jsonl | triage run --backend ollama | triage-stats
+cat alerts.jsonl | triagedy run --backend ollama | jq '.action'
 ```
 
 ## What it does
@@ -38,26 +40,26 @@ The decision shape mirrors TypeSafe's [System One primitives](https://docs.types
 
 ```
 # today
-triage run --backend ollama --model gemma4:e2b < alerts.jsonl
+triagedy run --backend ollama --model gemma4:e2b < alerts.jsonl
 
 # when Jev access lands
-TYPESAFE_API_KEY=... triage run --backend jev < alerts.jsonl
+TYPESAFE_API_KEY=... triagedy run --backend jev < alerts.jsonl
 ```
 
 ## Usage
 
 ```
 # assess alerts from stdin → JSONL decisions on stdout
-triage run --backend ollama --model gemma4:e2b < alerts.jsonl
+triagedy run --backend ollama --model gemma4:e2b < alerts.jsonl
 
 # parallel assessments (4 in flight), output order still matches input order
-triage run --backend ollama --jobs 4 < alerts.jsonl
+triagedy run --backend ollama --jobs 4 < alerts.jsonl
 
 # files instead of pipes
-triage run --backend mock --input alerts.jsonl --output decisions.jsonl
+triagedy run --backend mock --input alerts.jsonl --output decisions.jsonl
 
 # check your backend before a real run
-triage doctor --backend ollama --model gemma4:e2b
+triagedy doctor --backend ollama --model gemma4:e2b
 ```
 
 Exit codes: `0` all records ok, `1` at least one record failed, `2` config/runtime error.
@@ -113,7 +115,7 @@ Change the thresholds and the tests in the same file tell you what you broke.
 Requires a Rust toolchain (edition 2024):
 
 ```
-cargo build --release        # target/release/triage
+cargo build --release        # target/release/triagedy
 cargo test                   # 25 tests: unit + end-to-end, no network needed
 cargo clippy --all-targets   # clean
 ```
