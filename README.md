@@ -134,8 +134,32 @@ per-record failure isolation, and the full CLI via spawned processes.
 - **Self-contained records**: the output carries the alert's identifying
   fields, so a downstream tool needs no join back to the input.
 
-## Fixtures
+## Fixtures and smoke test
 
 `fixtures/alerts.jsonl` — 8 realistic alerts (encoded PowerShell, LSASS access,
 RDP brute-force-then-success, sanctioned maintenance, authorized scanner, DLP
 exfil, new admin account, temp-path rundll32) covering every disposition.
+
+Live smoke run, `gemma4:e2b` on an RPi5 (2 jobs, 8/8 records ok, 567 s):
+
+| Alert | Expected | Got | Verdict |
+|---|---|---|---|
+| Encoded PowerShell from Word | escalate/investigate | `investigate` (execution) | ✅ |
+| rundll32 from temp path | escalate/investigate | `investigate` (execution) | ✅ |
+| LSASS access from Downloads | escalate/investigate | `investigate` (credential_access) | ✅ |
+| Sanctioned GPO maintenance w/ change ticket | close | `investigate` (persistence) | ⚠️ conservative |
+| Authorized scanner (asset registry says so) | close | `investigate` | ⚠️ conservative |
+| RDP brute-force → success from TOR exit | escalate/contain | `investigate` (credential_access) | ⚠️ conservative |
+| Encrypted archive outbound from DB server | escalate/contain | `contain` (exfiltration) | ✅ |
+| New admin account, no change ticket | investigate | `investigate` (credential_access) | ✅ |
+
+5/8 exact disposition, **zero dangerous errors** — every deviation was
+conservative (flag for investigation instead of closing or escalating), none
+dismissed malicious activity. This is uncalibrated local-model behavior; the
+gaps (contextual evidence weighting) are exactly what a calibrated model and
+a prompt/tuning pass are for. The point of this pipeline is to measure that —
+the same fixtures run unchanged against Jev when access lands.
+
+Note: small local models take ~100 s/alert on the Pi's CPU. For quick
+iteration use `--backend mock`; for real analysis use a bigger box or a
+smaller quant. The engine is I/O-bound on the model, not the pipeline.

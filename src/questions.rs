@@ -100,6 +100,12 @@ pub fn ollama_prompt(alert: &Alert) -> String {
         "You are a SOC triage analyst. Read the security alert JSON below and answer the \
          triage questions with honest probabilities. Respond with one JSON object only.\n\n",
     );
+    q.push_str(
+        "Before judging: check every field of the alert as evidence. Change tickets, sanctioned \
+         changes, asset registries, maintenance windows, and known-good tooling can legitimate \
+         activity; encoded commands, temp paths, foreign IPs, and missing change records weigh \
+         against it.\n\n",
+    );
     q.push_str("Questions:\n");
     q.push_str(
         "1. disposition: one of close|escalate|contain|investigate. close=benign/expected, \
