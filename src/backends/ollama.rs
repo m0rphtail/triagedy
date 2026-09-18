@@ -148,6 +148,7 @@ impl OllamaBackend {
                 probabilities: BTreeMap::new(),
                 confidence: parsed.attack_class_confidence,
             }),
+            duplicate_of_recent: None,
         })
     }
 }

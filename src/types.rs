@@ -60,4 +60,17 @@ pub struct RawAnswers {
     pub false_positive_probability: Option<NoulAnswer>,
     pub requires_escalation: Option<NoulAnswer>,
     pub attack_class: Option<ChoiceAnswer>,
+    /// Only asked, and only answered, when a recent-activity context is in play.
+    pub duplicate_of_recent: Option<NoulAnswer>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_answers_defaults_duplicate_to_none() {
+        let r = RawAnswers::default();
+        assert!(r.duplicate_of_recent.is_none());
+    }
 }

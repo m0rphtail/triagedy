@@ -108,6 +108,7 @@ mod tests {
                 probabilities: BTreeMap::new(),
                 confidence: 0.7,
             }),
+            duplicate_of_recent: None,
         }
     }
 

@@ -218,6 +218,7 @@ impl JevBackend {
             false_positive_probability: Some(fp),
             requires_escalation: Some(esc),
             attack_class: Some(attack),
+            duplicate_of_recent: None,
         })
     }
 }

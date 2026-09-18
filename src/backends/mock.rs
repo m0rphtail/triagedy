@@ -77,6 +77,7 @@ impl MockBackend {
                 probabilities: std::collections::BTreeMap::new(),
                 confidence: attack_class_confidence,
             }),
+            duplicate_of_recent: None,
         })
     }
 }
