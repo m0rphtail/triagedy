@@ -24,6 +24,8 @@ struct OllamaDecision {
     requires_escalation: f64,
     attack_class: String,
     attack_class_confidence: f64,
+    #[serde(default)]
+    duplicate_of_recent: Option<f64>,
 }
 
 /// Ollama-backed decision transport.
@@ -32,7 +34,6 @@ pub struct OllamaBackend {
     client: reqwest::Client,
     url: String,
     model: String,
-    schema: Value,
 }
 
 /// One retry: a local model occasionally drifts off-schema; the retry is
@@ -49,24 +50,23 @@ impl OllamaBackend {
             client,
             url: format!("{}/api/generate", cfg.ollama_url.trim_end_matches('/')),
             model: cfg.model.clone(),
-            schema: questions::ollama_format_schema(),
         })
     }
 
     pub async fn assess(
         &self,
         alert: &Alert,
-        _context: Option<&TriageContext>,
+        context: Option<&TriageContext>,
     ) -> Result<RawAnswers, String> {
-        let prompt = questions::ollama_prompt(alert);
+        let prompt = questions::ollama_prompt(alert, context);
         let body = json!({
             "model": self.model,
             "prompt": prompt,
             "stream": false,
-            "format": self.schema,
             // Thinking-capable models route their whole reply into the
             // `thinking` field unless disabled, leaving `response` empty. Both
             // fields are handled below, so either kind of model works here.
+            "format": questions::ollama_format_schema(context.is_some()),
             "think": false,
             "options": { "temperature": 0.0 },
         });
@@ -153,7 +153,7 @@ impl OllamaBackend {
                 probabilities: BTreeMap::new(),
                 confidence: parsed.attack_class_confidence,
             }),
-            duplicate_of_recent: None,
+            duplicate_of_recent: parsed.duplicate_of_recent.map(|noul| NoulAnswer { noul }),
         })
     }
 }

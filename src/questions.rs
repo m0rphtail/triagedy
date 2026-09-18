@@ -5,13 +5,14 @@
 //! - rendered into a plain-text prompt + JSON schema for the `ollama` backend
 
 use crate::alert::Alert;
+use crate::context::TriageContext;
 use crate::types::{ATTACK_CLASSES, DISPOSITIONS, SEVERITY_LEVELS};
 use serde_json::{Value, json};
 
 /// The TypeSafe questions map, sent verbatim as the `questions` field of a
 /// `POST /v1/systemone` request.
-pub fn typesafe_questions() -> Value {
-    json!({
+pub fn typesafe_questions(with_context: bool) -> Value {
+    let mut questions = json!({
         "disposition": {
             "type": "choice",
             "instructions": "Given this security alert, what is the correct triage disposition?",
@@ -51,12 +52,24 @@ pub fn typesafe_questions() -> Value {
                 "exfiltration": "Moving data out: large outbound transfers, archive staging, upload from server roles."
             }
         }
-    })
+    });
+
+    if with_context {
+        questions["duplicate_of_recent"] = json!({
+            "type": "noul",
+            "instructions": "This alert is a restatement or continuation of activity already recorded in recent_activity: the same incident, or the same host, already actioned there.",
+            "criteria": {
+                "true": "recent_activity already shows this host or incident; this alert adds no new stage or evidence.",
+                "false": "New activity, a new host, or a new stage of an incident not present in the context."
+            }
+        });
+    }
+    questions
 }
 
 /// The JSON schema the `ollama` backend constrains generation to.
-pub fn ollama_format_schema() -> Value {
-    json!({
+pub fn ollama_format_schema(with_context: bool) -> Value {
+    let mut schema = json!({
         "type": "object",
         "properties": {
             "disposition": { "type": "string", "enum": DISPOSITIONS },
@@ -78,7 +91,16 @@ pub fn ollama_format_schema() -> Value {
             "attack_class",
             "attack_class_confidence"
         ]
-    })
+    });
+
+    if with_context {
+        schema["properties"]["duplicate_of_recent"] =
+            json!({ "type": "number", "minimum": 0.0, "maximum": 1.0 });
+        if let Some(required) = schema["required"].as_array_mut() {
+            required.push(json!("duplicate_of_recent"));
+        }
+    }
+    schema
 }
 
 /// How much of the alert JSON we feed to the model. Alerts are small;
@@ -86,7 +108,7 @@ pub fn ollama_format_schema() -> Value {
 const MAX_STATE_CHARS: usize = 8_000;
 
 /// Render the prompt for an LLM asked to answer the same five questions.
-pub fn ollama_prompt(alert: &Alert) -> String {
+pub fn ollama_prompt(alert: &Alert, context: Option<&TriageContext>) -> String {
     let mut state = alert.raw.to_string();
     if state.chars().count() > MAX_STATE_CHARS {
         state = format!(
@@ -106,6 +128,26 @@ pub fn ollama_prompt(alert: &Alert) -> String {
          activity; encoded commands, temp paths, foreign IPs, and missing change records weigh \
          against it.\n\n",
     );
+    if let Some(ctx) = context {
+        q.push_str(
+            "Recent activity already triaged (newest last) — use it to recognise repeats:\n",
+        );
+        for item in &ctx.items {
+            q.push_str(&format!(
+                "- id={} host={} rule={} action={} disposition={} at={}\n",
+                item.id,
+                item.host.as_deref().unwrap_or("-"),
+                item.rule.as_deref().unwrap_or("-"),
+                item.action.as_deref().unwrap_or("-"),
+                item.disposition.as_deref().unwrap_or("-"),
+                item.timestamp.as_deref().unwrap_or("-"),
+            ));
+        }
+        q.push_str(
+            "If this alert restates activity above (same incident, same host), raise \
+             duplicate_of_recent. A NEW stage of an existing incident is NOT a duplicate.\n\n",
+        );
+    }
     q.push_str("Questions:\n");
     q.push_str(
         "1. disposition: one of close|escalate|contain|investigate. close=benign/expected, \
@@ -123,7 +165,51 @@ pub fn ollama_prompt(alert: &Alert) -> String {
         "7. attack_class: one of none|execution|credential_access|persistence|lateral_movement|exfiltration.\n",
     );
     q.push_str("8. attack_class_confidence: 0.0-1.0.\n\n");
+    if context.is_some() {
+        q.push_str(
+            "9. duplicate_of_recent: 0.0-1.0, probability this alert is already covered by the recent activity above.\n\n",
+        );
+    }
     q.push_str("Alert JSON:\n");
     q.push_str(&state);
     q
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn question_set_gains_duplicate_only_with_context() {
+        let without = typesafe_questions(false);
+        let with = typesafe_questions(true);
+        assert!(without.get("duplicate_of_recent").is_none());
+        let obj = without.as_object().unwrap();
+        assert_eq!(
+            obj.len(),
+            5,
+            "the no-context question map must stay exactly five questions"
+        );
+        for key in [
+            "disposition",
+            "severity",
+            "false_positive_probability",
+            "requires_escalation",
+            "attack_class",
+        ] {
+            assert!(obj.contains_key(key), "missing {key}");
+        }
+        assert_eq!(with.as_object().unwrap().len(), 6);
+        assert!(with.get("duplicate_of_recent").is_some());
+    }
+
+    #[test]
+    fn ollama_schema_gains_duplicate_only_with_context() {
+        let without = ollama_format_schema(false);
+        assert!(without["properties"].get("duplicate_of_recent").is_none());
+        let with = ollama_format_schema(true);
+        assert!(with["properties"]["duplicate_of_recent"]["type"] == "number");
+        let required = with["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "duplicate_of_recent"));
+    }
 }

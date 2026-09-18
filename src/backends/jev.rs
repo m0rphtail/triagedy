@@ -72,7 +72,7 @@ impl JevBackend {
             // Model resolution happens in the CLI; "jev-latest" is the default there.
             model: cfg.model.clone(),
             api_key,
-            questions: questions::typesafe_questions(),
+            questions: questions::typesafe_questions(false),
         })
     }
 
