@@ -8,6 +8,7 @@
 mod alert;
 mod backends;
 mod config;
+mod context;
 mod decision;
 mod engine;
 mod policy;
