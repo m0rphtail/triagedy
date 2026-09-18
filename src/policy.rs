@@ -60,6 +60,25 @@ pub fn assess(d: &Decision) -> Assessment {
         action = Action::Escalate;
     }
 
+    // A restatement of already-handled activity may be downgraded — but only
+    // the least dangerous direction, and never when severity is high (a new
+    // stage of the same incident is not a duplicate).
+    if let Some(dup) = d.duplicate_probability
+        && dup >= 0.8
+    {
+        if action == Action::Escalate && d.severity < 2.0 {
+            notes.push(format!(
+                "downgraded escalate→investigate: duplicate of recent activity (p={dup:.2}), severity {:.2}",
+                d.severity
+            ));
+            action = Action::Investigate;
+        } else {
+            notes.push(format!(
+                "possible duplicate of recent activity (p={dup:.2})"
+            ));
+        }
+    }
+
     let mut review_required = false;
     if d.disposition_confidence < 0.6 {
         review_required = true;
@@ -169,5 +188,44 @@ mod tests {
 
         let d = decision("escalate", 2.0, 0.1, 0.9);
         assert!(!assess(&d).review_required);
+    }
+
+    #[test]
+    fn duplicate_downgrades_low_severity_escalation() {
+        let mut d = decision("escalate", 1.2, 0.1, 0.9);
+        d.duplicate_probability = Some(0.9);
+        let a = assess(&d);
+        assert_eq!(a.action, Action::Investigate);
+        assert!(
+            a.notes.iter().any(|n| n.contains("duplicate")),
+            "notes: {:?}",
+            a.notes
+        );
+    }
+
+    #[test]
+    fn duplicate_never_downgrades_high_severity() {
+        let mut d = decision("escalate", 2.5, 0.1, 0.9);
+        d.duplicate_probability = Some(0.95);
+        let a = assess(&d);
+        assert_eq!(a.action, Action::Escalate);
+        assert!(a.notes.iter().any(|n| n.contains("duplicate")));
+    }
+
+    #[test]
+    fn duplicate_notes_but_does_not_change_other_actions() {
+        let mut d = decision("close", 0.5, 0.9, 0.0);
+        d.duplicate_probability = Some(0.85);
+        let a = assess(&d);
+        assert_eq!(a.action, Action::Close);
+        assert!(a.notes.iter().any(|n| n.contains("duplicate")));
+    }
+
+    #[test]
+    fn low_duplicate_probability_is_ignored() {
+        let mut d = decision("escalate", 1.2, 0.1, 0.9);
+        d.duplicate_probability = Some(0.4);
+        assert_eq!(assess(&d).action, Action::Escalate);
+        assert!(!assess(&d).notes.iter().any(|n| n.contains("duplicate")));
     }
 }
