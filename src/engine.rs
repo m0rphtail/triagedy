@@ -74,6 +74,7 @@ pub async fn run<R: BufRead, W: Write>(
     backend_name: &str,
     model: &str,
     jobs: usize,
+    context: Option<&crate::context::TriageContext>,
 ) -> anyhow::Result<RunStats> {
     let mut items: Vec<(usize, String)> = Vec::new();
     for (idx, line) in input.by_ref().lines().enumerate() {
@@ -92,7 +93,7 @@ pub async fn run<R: BufRead, W: Write>(
     };
 
     let mut stream = stream::iter(items.into_iter().map(|(idx, line)| async move {
-        process_line(backend, backend_name, model, idx, &line).await
+        process_line(backend, backend_name, model, idx, &line, context).await
     }))
     .buffered(jobs);
 
@@ -117,6 +118,7 @@ async fn process_line(
     model: &str,
     idx: usize,
     line: &str,
+    context: Option<&crate::context::TriageContext>,
 ) -> OutputRecord {
     let alert = match crate::alert::parse_alert(line, idx) {
         Ok(a) => a,
@@ -132,7 +134,7 @@ async fn process_line(
         }
     };
 
-    let raw = match backend.assess(&alert).await {
+    let raw = match backend.assess(&alert, context).await {
         Ok(r) => r,
         Err(e) => {
             return err_record(
@@ -265,6 +267,7 @@ mod tests {
             "mock",
             "mock",
             6,
+            None,
         )
         .await
         .unwrap();
@@ -308,6 +311,7 @@ mod tests {
             "mock",
             "mock",
             2,
+            None,
         )
         .await
         .unwrap();
@@ -353,6 +357,7 @@ mod tests {
             "mock",
             "mock",
             1,
+            None,
         )
         .await
         .unwrap();
@@ -374,6 +379,7 @@ mod tests {
             "mock",
             "mock",
             4,
+            None,
         )
         .await
         .unwrap();

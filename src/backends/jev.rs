@@ -7,6 +7,7 @@
 
 use super::BackendConfig;
 use crate::alert::Alert;
+use crate::context::TriageContext;
 use crate::questions;
 use crate::types::*;
 use serde::Deserialize;
@@ -75,7 +76,11 @@ impl JevBackend {
         })
     }
 
-    pub async fn assess(&self, alert: &Alert) -> Result<RawAnswers, String> {
+    pub async fn assess(
+        &self,
+        alert: &Alert,
+        _context: Option<&TriageContext>,
+    ) -> Result<RawAnswers, String> {
         let body = json!({
             "state": alert.raw,
             "model": self.model,
@@ -239,7 +244,7 @@ pub async fn doctor(cfg: &BackendConfig) -> Result<Vec<String>, String> {
 
     let started = std::time::Instant::now();
     let raw = backend
-        .assess(&probe)
+        .assess(&probe, None)
         .await
         .map_err(|e| format!("decision round-trip failed — {e}"))?;
     let decision = crate::decision::Decision::from_answers(&raw)

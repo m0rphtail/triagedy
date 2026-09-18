@@ -92,6 +92,10 @@ struct RunArgs {
     /// Suppress the stderr summary line
     #[arg(long)]
     quiet: bool,
+    /// JSONL of recent decisions (a previous run's output) to give the model
+    /// context for recognising restatements. Absent = today's behaviour.
+    #[arg(long)]
+    context: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -205,6 +209,29 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
     let backend = Backends::from_config(&cfg).map_err(|e| anyhow!(e))?;
     let model = cfg.model.clone();
 
+    let context = match &args.context {
+        Some(path) => {
+            let (ctx, skipped) = context::load_context(path).map_err(|e| anyhow!(e))?;
+            if skipped > 0 {
+                eprintln!("triagedy: context: skipped {skipped} unparseable line(s)");
+            }
+            if ctx.is_empty() {
+                eprintln!(
+                    "triagedy: context: no usable records in {} — continuing without context",
+                    path.display()
+                );
+                None
+            } else {
+                eprintln!(
+                    "triagedy: context: {} recent item(s) loaded",
+                    ctx.items.len()
+                );
+                Some(ctx)
+            }
+        }
+        None => None,
+    };
+
     let input: Box<dyn BufRead> = match &args.input {
         Some(path) => Box::new(BufReader::new(
             File::open(path).map_err(|e| anyhow!("opening {}: {e}", path.display()))?,
@@ -219,7 +246,16 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
     };
 
     let started = Instant::now();
-    let stats = engine::run(input, &mut out, &backend, kind.name(), &model, args.jobs).await?;
+    let stats = engine::run(
+        input,
+        &mut out,
+        &backend,
+        kind.name(),
+        &model,
+        args.jobs,
+        context.as_ref(),
+    )
+    .await?;
     out.flush().ok();
 
     if !args.quiet {

@@ -6,6 +6,7 @@
 
 use super::BackendConfig;
 use crate::alert::Alert;
+use crate::context::TriageContext;
 use crate::questions;
 use crate::types::*;
 use serde::Deserialize;
@@ -52,7 +53,11 @@ impl OllamaBackend {
         })
     }
 
-    pub async fn assess(&self, alert: &Alert) -> Result<RawAnswers, String> {
+    pub async fn assess(
+        &self,
+        alert: &Alert,
+        _context: Option<&TriageContext>,
+    ) -> Result<RawAnswers, String> {
         let prompt = questions::ollama_prompt(alert);
         let body = json!({
             "model": self.model,
@@ -213,7 +218,7 @@ pub async fn doctor(cfg: &BackendConfig) -> Result<Vec<String>, String> {
     let backend = OllamaBackend::new(cfg)?;
     let started = std::time::Instant::now();
     let raw = backend
-        .assess(&probe)
+        .assess(&probe, None)
         .await
         .map_err(|e| format!("decision round-trip failed — {e}"))?;
     let decision = crate::decision::Decision::from_answers(&raw)

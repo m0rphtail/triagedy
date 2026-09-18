@@ -2,6 +2,7 @@
 //! alert content so runs are reproducible — used by tests and dry runs.
 
 use super::super::alert::Alert;
+use super::super::context::TriageContext;
 use super::super::types::{
     ATTACK_CLASSES, ChoiceAnswer, DISPOSITIONS, NoulAnswer, RawAnswers, ScoreAnswer,
 };
@@ -18,7 +19,11 @@ use std::hash::{Hash, Hasher};
 pub struct MockBackend;
 
 impl MockBackend {
-    pub async fn assess(&self, alert: &Alert) -> Result<RawAnswers, String> {
+    pub async fn assess(
+        &self,
+        alert: &Alert,
+        _context: Option<&TriageContext>,
+    ) -> Result<RawAnswers, String> {
         let delay_ms = alert
             .raw
             .get("mock_delay_ms")
@@ -97,8 +102,8 @@ mod tests {
         let a = alert(r#"{"id":"A-1","rule":"test","command_line":"x"}"#);
         let b = alert(r#"{"id":"A-2","rule":"test","command_line":"y"}"#);
 
-        let r1 = MockBackend.assess(&a).await.unwrap();
-        let r2 = MockBackend.assess(&a).await.unwrap();
+        let r1 = MockBackend.assess(&a, None).await.unwrap();
+        let r2 = MockBackend.assess(&a, None).await.unwrap();
         assert_eq!(
             format!("{r1:?}"),
             format!("{r2:?}"),
@@ -106,7 +111,7 @@ mod tests {
         );
 
         // Different alerts still produce fully valid decisions.
-        for r in [&r1, &MockBackend.assess(&b).await.unwrap()] {
+        for r in [&r1, &MockBackend.assess(&b, None).await.unwrap()] {
             let d = Decision::from_answers(r).expect("mock output must always validate");
             assert!((0.0..=3.0).contains(&d.severity));
             assert!((0.0..=1.0).contains(&d.false_positive_probability));
@@ -117,7 +122,7 @@ mod tests {
     async fn varied_alerts_all_validate() {
         for i in 0..64 {
             let line = format!(r#"{{"id":"A-{i}","rule":"r{i}","command_line":"cmd {i}"}}"#);
-            let raw = MockBackend.assess(&alert(&line)).await.unwrap();
+            let raw = MockBackend.assess(&alert(&line), None).await.unwrap();
             Decision::from_answers(&raw).expect("valid decision");
         }
     }

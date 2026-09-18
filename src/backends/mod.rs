@@ -10,6 +10,7 @@ pub mod mock;
 pub mod ollama;
 
 use crate::alert::Alert;
+use crate::context::TriageContext;
 use crate::types::RawAnswers;
 
 /// Which backend to run.
@@ -70,12 +71,17 @@ impl Backends {
         }
     }
 
-    /// Ask the backend to assess one alert.
-    pub async fn assess(&self, alert: &Alert) -> Result<RawAnswers, String> {
+    /// Ask the backend to assess one alert. `context`, when present, is the
+    /// recent-activity window for this run.
+    pub async fn assess(
+        &self,
+        alert: &Alert,
+        context: Option<&TriageContext>,
+    ) -> Result<RawAnswers, String> {
         match self {
-            Self::Mock(b) => b.assess(alert).await,
-            Self::Ollama(b) => b.assess(alert).await,
-            Self::Jev(b) => b.assess(alert).await,
+            Self::Mock(b) => b.assess(alert, context).await,
+            Self::Ollama(b) => b.assess(alert, context).await,
+            Self::Jev(b) => b.assess(alert, context).await,
         }
     }
 }
