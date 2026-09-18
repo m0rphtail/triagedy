@@ -4,13 +4,22 @@
 
 ![ci](https://github.com/m0rphtail/triagedy/actions/workflows/ci.yml/badge.svg)
 
-Alert triage as a UNIX filter: **JSONL alerts in, typed decisions out.**
+**Powered by [TypeSafe Jev](https://typesafe.ai) (System One).** Typed decisions
+with calibrated probabilities in ~200 ms, at $0.042/Mtok — a screen cheap enough
+to put in front of *every* alert, so your expensive triage (and your humans)
+only see what survives it.
+
+Alert triage as a UNIX filter: **JSONL security alerts in, typed decisions out.**
 
 One binary. No daemon, no database, no framework. Pipe it, host it, cron it.
 
 ```
-cat alerts.jsonl | triagedy run --backend ollama | jq '.action'
+cat alerts.jsonl | triagedy run | jq '.action'
 ```
+
+Not ready for Jev, or need to keep data on-prem? Point `--backend openai` at any
+OpenAI-compatible server — Ollama, vLLM, LM Studio, llama.cpp, OpenRouter — and
+the pipeline is identical.
 
 ## What it does
 
@@ -31,37 +40,34 @@ judges, the code decides what to do.
 
 | Backend | Status | Notes |
 |---|---|---|
-| `mock` | always available | offline, deterministic; for tests, dry runs, pipelines |
-| `ollama` | works today | any model the server serves — local or cloud; JSON-schema-constrained; handles thinking models |
-| `jev` | **live** | TypeSafe System One API (`POST /v1/systemone`), calibrated probabilities — needs an API key (`triagedy init`) |
+| `jev` | **default, intended path** | TypeSafe System One (`POST /v1/systemone`). Typed answers, calibrated confidence. Needs a key: `triagedy init`. |
+| `openai` | fallback / optional | Any OpenAI-compatible `POST {base}/chat/completions` — Ollama, OpenRouter, vLLM, LM Studio, llama.cpp, Groq. Probes a response-format ladder (`json_schema` → `json_object` → none) once per run and caches what works. Confidence is the model's self-report: **uncalibrated**. `--backend ollama` and `--ollama-url` are accepted as aliases. |
+| `mock` | always available | Offline, deterministic. For tests, dry runs, CI. |
 
 The decision shape mirrors TypeSafe's [System One primitives](https://docs.typesafe.ai)
-(Choice / Score / Noul), so moving from a local model to Jev is a flag change:
+(Choice / Score / Noul), so the fallback path and Jev produce the same records.
 
 ### Choosing a model
 
-**No model is baked into the binary.** triagedy drives whatever you point it
-at, so the same binary fits a laptop, a Pi, a GPU box, or a hosted model:
+Jev needs no model flag — `jev-latest` is the service default. For the
+`openai` fallback, pick whatever the server serves (`--model`, or
+`$TRIAGEDY_MODEL`); with no model given, triagedy stops with a config error
+rather than guessing.
 
 | Where | How |
 |---|---|
-| any local Ollama model | `--model <name>` (see `ollama list`) |
-| a model too big for your box | an Ollama cloud model — sign in with `ollama signin`; cloud models show up with a `-cloud` tag |
-| a different server | `--ollama-url` |
-| the Jev service | `--backend jev` (+ `TYPESAFE_API_KEY`) |
+| Jev (the product) | `--backend jev` (default) — needs a key |
+| any local Ollama model | `--backend openai --model <name>` (see `ollama list`) |
+| a hosted OpenAI-compatible API | `--backend openai --openai-url https://… --api-key $OPENAI_API_KEY` |
+| a model too big for your box | an Ollama cloud model — `ollama signin`, `-cloud` tags |
 | your own transport | add a variant in `src/backends/` — one `assess()` method |
 
-Resolution order is `--model`, then `$TRIAGEDY_MODEL`, then nothing: with the
-`ollama` backend and no model given, triagedy stops with a config error rather
-than guessing. Pick a model that fits your hardware — the model is the only
-heavy part, and it loads once per run.
-
 ```
-# local model, today
-triagedy run --backend ollama --model gemma4:e2b < alerts.jsonl
-
-# Jev (TypeSafe System One) — after `triagedy init`
+# the intended path — Jev (after a one-time `triagedy init`)
 triagedy run --backend jev < alerts.jsonl
+
+# fallback: any OpenAI-compatible server
+triagedy run --backend openai --model gemma4:e2b --openai-url http://127.0.0.1:11434/v1 < alerts.jsonl
 ```
 
 ### API keys
@@ -74,27 +80,38 @@ triagedy init          # hidden prompt; writes ~/.config/triagedy/env, mode 0600
 triagedy doctor --backend jev
 ```
 
-Resolution order: `--api-key` flag, then `$TYPESAFE_API_KEY`, then the stored
-file. The flag exists for scripting only; prefer `init` or the environment.
+Keys are resolved **per backend**: Jev reads `--api-key`, then
+`$TYPESAFE_API_KEY`, then the stored file; `openai` reads `--api-key`, then
+`$OPENAI_API_KEY`. A key for one is never sent to the other.
+
+> One full-context LLM triage call costs about the same as **1,365 Jev screens**
+> — that ratio is why screening every alert first pays for itself.
+> (Figures from [Watson Labs' independent TypeSafe deployment write-up](https://blog.watson-labs.co.uk/typesafe-ai-alert-fatigue/).)
 
 ## Usage
 
 ```
-# assess alerts from stdin → JSONL decisions on stdout
-triagedy run --backend ollama --model gemma4:e2b < alerts.jsonl
+# the intended path — Jev, typed decisions with calibrated confidence
+triagedy run < alerts.jsonl
 
-# pin the model in the environment instead of the command line
-TRIAGEDY_MODEL=gemma4:e2b triagedy run --backend ollama < alerts.jsonl
+# fallback: any OpenAI-compatible server (Ollama here), same output shape
+triagedy run --backend openai --model gemma4:e2b < alerts.jsonl
+
+# pin the fallback model in the environment instead of the command line
+TRIAGEDY_MODEL=gemma4:e2b triagedy run --backend openai < alerts.jsonl
 
 # parallel assessments (4 in flight), output order still matches input order
-triagedy run --backend ollama --model <name> --jobs 4 < alerts.jsonl
+triagedy run --jobs 4 < alerts.jsonl
 
 # files instead of pipes
 triagedy run --backend mock --input alerts.jsonl --output decisions.jsonl
 
+# convert a Windows Event Log XML export, then triage it — one pipe
+triagedy convert --format sysmon-xml < windows-sysmon.log | triagedy run
+
 # check your backend before a real run
-triagedy doctor --backend ollama --model gemma4:e2b
 triagedy doctor --backend jev
+triagedy doctor --backend openai --model gemma4:e2b
 ```
 
 Exit codes: `0` all records ok, `1` at least one record failed, `2` config/runtime error.
