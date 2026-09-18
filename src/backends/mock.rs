@@ -22,7 +22,7 @@ impl MockBackend {
     pub async fn assess(
         &self,
         alert: &Alert,
-        _context: Option<&TriageContext>,
+        context: Option<&TriageContext>,
     ) -> Result<RawAnswers, String> {
         let delay_ms = alert
             .raw
@@ -64,6 +64,10 @@ impl MockBackend {
         };
         let (attack_class, attack_class_confidence) = pick(&ATTACK_CLASSES, 7);
 
+        let duplicate_of_recent = context.map(|_| NoulAnswer {
+            noul: (mix(h, 8) % 101) as f64 / 100.0,
+        });
+
         Ok(RawAnswers {
             disposition: Some(ChoiceAnswer {
                 choice: disposition,
@@ -82,7 +86,7 @@ impl MockBackend {
                 probabilities: std::collections::BTreeMap::new(),
                 confidence: attack_class_confidence,
             }),
-            duplicate_of_recent: None,
+            duplicate_of_recent,
         })
     }
 }

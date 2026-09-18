@@ -386,4 +386,57 @@ mod tests {
         assert_eq!(stats, RunStats::default());
         assert!(out.is_empty());
     }
+
+    #[tokio::test]
+    async fn context_produces_a_duplicate_probability() {
+        use crate::context::{ContextItem, TriageContext};
+        let ctx = TriageContext {
+            items: vec![ContextItem {
+                id: "prev-1".into(),
+                host: Some("WS-1".into()),
+                rule: None,
+                action: None,
+                disposition: None,
+                attack_class: None,
+                timestamp: None,
+            }],
+        };
+        let backend = Backends::Mock(MockBackend);
+        let mut out: Vec<u8> = Vec::new();
+        let stats = run(
+            std::io::Cursor::new("{\"id\":\"n1\"}\n"),
+            &mut out,
+            &backend,
+            "mock",
+            "mock",
+            1,
+            Some(&ctx),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stats.ok, 1);
+        let rec: serde_json::Value =
+            serde_json::from_str(String::from_utf8(out).unwrap().trim()).unwrap();
+        assert!(rec["decision"]["duplicate_probability"].is_number());
+    }
+
+    #[tokio::test]
+    async fn no_context_leaves_the_field_out() {
+        let backend = Backends::Mock(MockBackend);
+        let mut out: Vec<u8> = Vec::new();
+        run(
+            std::io::Cursor::new("{\"id\":\"n1\"}\n"),
+            &mut out,
+            &backend,
+            "mock",
+            "mock",
+            1,
+            None,
+        )
+        .await
+        .unwrap();
+        let rec: serde_json::Value =
+            serde_json::from_str(String::from_utf8(out).unwrap().trim()).unwrap();
+        assert!(rec["decision"].get("duplicate_probability").is_none());
+    }
 }
