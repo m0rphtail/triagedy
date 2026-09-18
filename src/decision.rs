@@ -18,6 +18,10 @@ pub struct Decision {
     pub requires_escalation: f64,
     pub attack_class: String,
     pub attack_class_confidence: f64,
+    /// Probability this alert restates activity already in the context.
+    /// Absent when no context was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate_probability: Option<f64>,
 }
 
 impl Decision {
@@ -66,6 +70,16 @@ impl Decision {
             return Err(format!("invalid attack_class option: {}", attack.choice));
         }
 
+        let duplicate_probability = match &a.duplicate_of_recent {
+            Some(n) => {
+                if !n.noul.is_finite() || !(0.0..=1.0).contains(&n.noul) {
+                    return Err(format!("duplicate_of_recent out of range 0-1: {}", n.noul));
+                }
+                Some(n.noul)
+            }
+            None => None,
+        };
+
         Ok(Self {
             disposition: disposition.choice.clone(),
             disposition_confidence: disposition.confidence,
@@ -75,6 +89,7 @@ impl Decision {
             requires_escalation: esc.noul,
             attack_class: attack.choice.clone(),
             attack_class_confidence: attack.confidence,
+            duplicate_probability,
         })
     }
 }
@@ -143,5 +158,23 @@ mod tests {
         let mut raw = raw_valid();
         raw.attack_class = None;
         assert!(Decision::from_answers(&raw).is_err());
+    }
+
+    #[test]
+    fn accepts_and_validates_duplicate_probability() {
+        let mut raw = raw_valid();
+        raw.duplicate_of_recent = Some(NoulAnswer { noul: 0.87 });
+        let d = Decision::from_answers(&raw).unwrap();
+        assert_eq!(d.duplicate_probability, Some(0.87));
+
+        let mut raw = raw_valid();
+        raw.duplicate_of_recent = Some(NoulAnswer { noul: 1.4 });
+        assert!(Decision::from_answers(&raw).is_err());
+
+        let raw = raw_valid();
+        assert_eq!(
+            Decision::from_answers(&raw).unwrap().duplicate_probability,
+            None
+        );
     }
 }

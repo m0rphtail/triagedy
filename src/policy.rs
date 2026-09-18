@@ -97,6 +97,7 @@ mod tests {
             requires_escalation: esc,
             attack_class: "none".into(),
             attack_class_confidence: 0.9,
+            duplicate_probability: None,
         }
     }
 
