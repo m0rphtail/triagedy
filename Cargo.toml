@@ -10,6 +10,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+roxmltree = "0.21.1"
 rpassword = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

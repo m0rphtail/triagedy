@@ -9,6 +9,7 @@ mod alert;
 mod backends;
 mod config;
 mod context;
+mod convert;
 mod decision;
 mod engine;
 mod policy;
@@ -49,6 +50,21 @@ enum Command {
     Doctor(DoctorArgs),
     /// Store your TypeSafe API key securely (hidden input; written 0600, outside any repo).
     Init,
+    /// Convert telemetry exports to the JSONL that `run` consumes.
+    Convert(ConvertArgs),
+}
+
+#[derive(Args, Debug)]
+struct ConvertArgs {
+    /// Input format
+    #[arg(long, default_value = "sysmon-xml", value_name = "sysmon-xml")]
+    format: String,
+    /// Read events from a file instead of stdin
+    #[arg(long)]
+    input: Option<PathBuf>,
+    /// Write JSONL to a file instead of stdout
+    #[arg(long)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -162,7 +178,33 @@ async fn run(cli: Cli) -> anyhow::Result<i32> {
         Command::Run(args) => cmd_run(args).await,
         Command::Doctor(args) => cmd_doctor(args).await,
         Command::Init => cmd_init(),
+        Command::Convert(args) => cmd_convert(args),
     }
+}
+
+/// Convert a telemetry export to JSONL. Streaming, line by line; unparseable
+/// lines are counted and skipped rather than failing the batch.
+fn cmd_convert(args: ConvertArgs) -> anyhow::Result<i32> {
+    let input: Box<dyn BufRead> = match &args.input {
+        Some(path) => Box::new(BufReader::new(
+            File::open(path).map_err(|e| anyhow!("opening {}: {e}", path.display()))?,
+        )),
+        None => Box::new(BufReader::new(std::io::stdin())),
+    };
+    let mut out: Box<dyn Write> = match &args.output {
+        Some(path) => Box::new(BufWriter::new(
+            File::create(path).map_err(|e| anyhow!("creating {}: {e}", path.display()))?,
+        )),
+        None => Box::new(BufWriter::new(std::io::stdout())),
+    };
+
+    let stats = convert::convert_stream(input, &mut out, &args.format).map_err(|e| anyhow!(e))?;
+    out.flush().ok();
+    eprintln!(
+        "triagedy convert: {} events converted, {} line(s) skipped ({})",
+        stats.converted, stats.skipped, args.format
+    );
+    Ok(if stats.skipped > 0 { 1 } else { 0 })
 }
 
 /// Store the TypeSafe API key in the user's config dir (0600, outside any

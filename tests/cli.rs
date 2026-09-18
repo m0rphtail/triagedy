@@ -186,6 +186,42 @@ fn summary_line_reports_counts() {
 }
 
 #[test]
+fn convert_sysmon_xml_line_to_jsonl() {
+    let xml = r#"<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><EventID>1</EventID><EventRecordID>99</EventRecordID><Computer>host1</Computer></System><EventData><Data Name='Image'>C:\x\evil.exe</Data><Data Name='CommandLine'>evil.exe -enc AAAA</Data></EventData></Event>"#;
+    let (code, stdout, stderr) =
+        run_cli(&["convert", "--format", "sysmon-xml"], &format!("{xml}\n"));
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(v["id"], "host1-99");
+    assert_eq!(v["process"], r"C:\x\evil.exe");
+    assert_eq!(v["command_line"], "evil.exe -enc AAAA");
+    assert!(stderr.contains("1 events converted"), "stderr: {stderr}");
+}
+
+#[test]
+fn convert_rejects_unknown_format() {
+    let (code, _stdout, stderr) = run_cli(&["convert", "--format", "nope"], "");
+    assert_eq!(code, Some(2));
+    assert!(stderr.contains("unsupported format"), "stderr: {stderr}");
+}
+
+#[test]
+fn convert_pipeline_into_run() {
+    // The whole point: XML export in, decisions out — three commands, one pipe.
+    let xml = r#"<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><EventID>1</EventID><EventRecordID>7</EventRecordID><Computer>hostZ</Computer></System><EventData><Data Name='Image'>C:\x\p.exe</Data></EventData></Event>"#;
+    let (code, converted, stderr) =
+        run_cli(&["convert", "--format", "sysmon-xml"], &format!("{xml}\n"));
+    assert_eq!(code, Some(0), "convert stderr: {stderr}");
+
+    let (code, decisions, stderr) = run_cli(&["run", "--backend", "mock", "--quiet"], &converted);
+    assert_eq!(code, Some(0), "run stderr: {stderr}");
+    let rec: serde_json::Value = serde_json::from_str(decisions.trim()).unwrap();
+    assert_eq!(rec["ok"], true);
+    assert_eq!(rec["id"], "hostZ-7");
+    assert!(rec["decision"].is_object());
+}
+
+#[test]
 fn context_file_is_honoured() {
     let dir = std::env::temp_dir().join(format!("triagedy-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
