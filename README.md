@@ -33,7 +33,7 @@ judges, the code decides what to do.
 |---|---|---|
 | `mock` | always available | offline, deterministic; for tests, dry runs, pipelines |
 | `ollama` | works today | any model the server serves — local or cloud; JSON-schema-constrained; handles thinking models |
-| `jev` | wired, awaiting access | TypeSafe System One API (`POST /v1/systemone`), calibrated probabilities |
+| `jev` | **live** | TypeSafe System One API (`POST /v1/systemone`), calibrated probabilities — needs an API key (`triagedy init`) |
 
 The decision shape mirrors TypeSafe's [System One primitives](https://docs.typesafe.ai)
 (Choice / Score / Noul), so moving from a local model to Jev is a flag change:
@@ -57,12 +57,25 @@ than guessing. Pick a model that fits your hardware — the model is the only
 heavy part, and it loads once per run.
 
 ```
-# today
+# local model, today
 triagedy run --backend ollama --model gemma4:e2b < alerts.jsonl
 
-# when Jev access lands
-TYPESAFE_API_KEY=... triagedy run --backend jev < alerts.jsonl
+# Jev (TypeSafe System One) — after `triagedy init`
+triagedy run --backend jev < alerts.jsonl
 ```
+
+### API keys
+
+Never paste a key on the command line — process arguments are visible to other
+users via `ps`. Store it once instead:
+
+```
+triagedy init          # hidden prompt; writes ~/.config/triagedy/env, mode 0600
+triagedy doctor --backend jev
+```
+
+Resolution order: `--api-key` flag, then `$TYPESAFE_API_KEY`, then the stored
+file. The flag exists for scripting only; prefer `init` or the environment.
 
 ## Usage
 
@@ -81,6 +94,7 @@ triagedy run --backend mock --input alerts.jsonl --output decisions.jsonl
 
 # check your backend before a real run
 triagedy doctor --backend ollama --model gemma4:e2b
+triagedy doctor --backend jev
 ```
 
 Exit codes: `0` all records ok, `1` at least one record failed, `2` config/runtime error.

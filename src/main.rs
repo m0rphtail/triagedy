@@ -7,6 +7,7 @@
 
 mod alert;
 mod backends;
+mod config;
 mod decision;
 mod engine;
 mod policy;
@@ -45,6 +46,8 @@ enum Command {
     Run(RunArgs),
     /// Check the configured backend: reachability, model, live round trip.
     Doctor(DoctorArgs),
+    /// Store your TypeSafe API key securely (hidden input; written 0600, outside any repo).
+    Init,
 }
 
 #[derive(Args, Debug)]
@@ -63,7 +66,8 @@ struct BackendArgs {
     /// TypeSafe System One endpoint
     #[arg(long, default_value = "https://api.typesafe.ai/v1/systemone")]
     typesafe_url: String,
-    /// TypeSafe API key (falls back to the TYPESAFE_API_KEY env var)
+    /// TypeSafe API key (prefer `triagedy init`: flags are visible to other
+    /// processes). Falls back to $TYPESAFE_API_KEY, then the stored key file.
     #[arg(long)]
     api_key: Option<String>,
     /// Per-request timeout, seconds
@@ -129,7 +133,8 @@ fn backend_config(args: &BackendArgs, kind: BackendKind) -> Result<BackendConfig
         api_key: args
             .api_key
             .clone()
-            .or_else(|| std::env::var("TYPESAFE_API_KEY").ok()),
+            .or_else(|| std::env::var("TYPESAFE_API_KEY").ok())
+            .or_else(|| config::load_key_from(&config::key_file())),
         timeout_secs: args.timeout_secs,
     })
 }
@@ -151,7 +156,46 @@ async fn run(cli: Cli) -> anyhow::Result<i32> {
     match cli.command {
         Command::Run(args) => cmd_run(args).await,
         Command::Doctor(args) => cmd_doctor(args).await,
+        Command::Init => cmd_init(),
     }
+}
+
+/// Store the TypeSafe API key in the user's config dir (0600, outside any
+/// repo). Hidden prompt on a terminal, one line from stdin otherwise, so
+/// `printf '%s\n' "$KEY" | triagedy init` works in automation.
+fn cmd_init() -> anyhow::Result<i32> {
+    let path = config::key_file();
+    let updating = path.exists();
+
+    let key = config::read_key_interactive().map_err(|e| anyhow!("reading key: {e}"))?;
+    let key = key.trim().to_string();
+
+    if key.is_empty() {
+        eprintln!("triagedy init: no key entered — nothing stored");
+        return Ok(1);
+    }
+    if key.chars().any(char::is_whitespace) {
+        eprintln!(
+            "triagedy init: the key contains whitespace mid-string — check the paste (nothing stored)"
+        );
+        return Ok(1);
+    }
+
+    config::store_key(&path, &key)
+        .map_err(|e| anyhow!("storing key at {}: {e}", path.display()))?;
+
+    let tail: String = key
+        .chars()
+        .skip(key.chars().count().saturating_sub(4))
+        .collect();
+    println!(
+        "triagedy init: {} key (…{} chars, ends ...{tail}) at {} (mode 0600)",
+        if updating { "updated" } else { "stored" },
+        key.chars().count(),
+        path.display()
+    );
+    println!("next: triagedy doctor --backend jev");
+    Ok(0)
 }
 
 async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {

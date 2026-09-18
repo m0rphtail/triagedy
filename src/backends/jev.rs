@@ -57,10 +57,10 @@ const MAX_ATTEMPTS: usize = 3;
 
 impl JevBackend {
     pub fn new(cfg: &BackendConfig) -> Result<Self, String> {
-        let api_key = cfg
-            .api_key
-            .clone()
-            .ok_or("backend 'jev' requires an API key (--api-key or TYPESAFE_API_KEY)")?;
+        let api_key = cfg.api_key.clone().ok_or(
+            "backend 'jev' requires an API key — run `triagedy init`, \
+                 or set TYPESAFE_API_KEY / pass --api-key",
+        )?;
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(cfg.timeout_secs))
             .build()
