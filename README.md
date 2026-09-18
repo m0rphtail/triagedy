@@ -4,10 +4,7 @@
 
 ![ci](https://github.com/m0rphtail/triagedy/actions/workflows/ci.yml/badge.svg)
 
-**Powered by [TypeSafe Jev](https://typesafe.ai) (System One).** Typed decisions
-with calibrated probabilities in ~200 ms, at $0.042/Mtok — a screen cheap enough
-to put in front of *every* alert, so your expensive triage (and your humans)
-only see what survives it.
+**Powered by [TypeSafe Jev](https://typesafe.ai) (System One).** 
 
 Alert triage as a UNIX filter: **JSONL security alerts in, typed decisions out.**
 
@@ -16,10 +13,6 @@ One binary. No daemon, no database, no framework. Pipe it, host it, cron it.
 ```
 cat alerts.jsonl | triagedy run | jq '.action'
 ```
-
-Not ready for Jev, or need to keep data on-prem? Point `--backend openai` at any
-OpenAI-compatible server — Ollama, vLLM, LM Studio, llama.cpp, OpenRouter — and
-the pipeline is identical.
 
 ## What it does
 
@@ -40,7 +33,7 @@ judges, the code decides what to do.
 
 | Backend | Status | Notes |
 |---|---|---|
-| `jev` | **default, intended path** | TypeSafe System One (`POST /v1/systemone`). Typed answers, calibrated confidence. Needs a key: `triagedy init`. |
+| `jev` | **default, intended path** | TypeSafe System One (`POST /v1/systemone`). Typed answers, calibrated confidence. Needs a key. |
 | `openai` | fallback / optional | Any OpenAI-compatible `POST {base}/chat/completions` — Ollama, OpenRouter, vLLM, LM Studio, llama.cpp, Groq. Probes a response-format ladder (`json_schema` → `json_object` → none) once per run and caches what works. Confidence is the model's self-report: **uncalibrated**. `--backend ollama` and `--ollama-url` are accepted as aliases. |
 | `mock` | always available | Offline, deterministic. For tests, dry runs, CI. |
 
@@ -51,16 +44,13 @@ The decision shape mirrors TypeSafe's [System One primitives](https://docs.types
 
 Jev needs no model flag — `jev-latest` is the service default. For the
 `openai` fallback, pick whatever the server serves (`--model`, or
-`$TRIAGEDY_MODEL`); with no model given, triagedy stops with a config error
-rather than guessing.
+`$TRIAGEDY_MODEL`).
 
 | Where | How |
 |---|---|
 | Jev (the product) | `--backend jev` (default) — needs a key |
-| any local Ollama model | `--backend openai --model <name>` (see `ollama list`) |
 | a hosted OpenAI-compatible API | `--backend openai --openai-url https://… --api-key $OPENAI_API_KEY` |
-| a model too big for your box | an Ollama cloud model — `ollama signin`, `-cloud` tags |
-| your own transport | add a variant in `src/backends/` — one `assess()` method |
+| any local Ollama model | `--backend openai --model <name>` (see `ollama list`) |
 
 ```
 # the intended path — Jev (after a one-time `triagedy init`)
@@ -189,39 +179,3 @@ per-record failure isolation, and the full CLI via spawned processes.
   probabilities; that swap is exactly what this pipeline was built for.
 - **Self-contained records**: the output carries the alert's identifying
   fields, so a downstream tool needs no join back to the input.
-
-## Smoke test
-
-No alert data ships with this repo — alert corpora stay local, and the
-`fixtures/` directory is gitignored. Supply your own JSONL.
-
-Recorded run: RPi5 (16 GB, 4 cores, CPU inference), 8 synthetic alerts covering
-every disposition, `--model gemma4:e2b --jobs 1`, **8/8 records ok, 490 s**
-(~61 s/alert):
-
-| Alert | Expected | Got | Verdict |
-|---|---|---|---|
-| Encoded PowerShell from Word | escalate/investigate | `investigate` (execution) | ✅ |
-| rundll32 from temp path | escalate/investigate | `investigate` (execution) | ✅ |
-| LSASS access from Downloads | escalate/investigate | `investigate` (credential_access) | ✅ |
-| Sanctioned GPO maintenance w/ change ticket | close | `close` (none) | ✅ |
-| Authorized scanner (asset registry says so) | close | `close` (none) | ✅ |
-| RDP brute-force → success from TOR exit | escalate/contain | `investigate` (credential_access) | ⚠️ conservative |
-| Encrypted archive outbound from DB server | escalate/contain | `investigate` (exfiltration) | ⚠️ conservative |
-| New admin account, no change ticket | investigate | `investigate` (credential_access) | ✅ |
-
-6/8 exact disposition, **zero dangerous errors** — both deviations flag for
-investigation instead of escalating or containing, and nothing malicious was
-dismissed. The two closes the model got right both had machine-readable
-evidence in the alert (change ticket, asset registry), which is the prompt's
-intended behavior. This is uncalibrated local-model behavior; the remaining
-gaps are exactly what a calibrated model and a prompt/tuning pass are for.
-Re-running the same private corpus against Jev when access lands is the
-calibration benchmark.
-
-Operational note on small hardware: the model is the whole memory story —
-`gemma4:e2b` sits at ~6.8 GB resident once loaded, and `ollama ps` shows it
-until it idles out. On a 16 GB box keep one inference slot (`--jobs 1`) so the
-model, the pipeline, and your shell all fit in RAM; a second slot or a parallel
-`cargo build` is what pushes the machine into swap. For quick iteration use
-`--backend mock`; the engine is I/O-bound on the model, not the pipeline.
