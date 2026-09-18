@@ -1,0 +1,50 @@
+# Dependabot configuration
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Two ecosystems: the Rust crate itself, and the Actions used by ci.yml.
+
+version: 2
+updates:
+  # --- Rust dependencies (Cargo.toml + Cargo.lock) -------------------------
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    labels:
+      - "dependencies"
+    groups:
+      # Patch and minor bumps batched into one PR — usually just lockfile
+      # movement, and reviewing them individually is noise. Majors stay
+      # ungrouped: each one deserves its own PR and a read of the changelog.
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # --- GitHub Actions used by .github/workflows/ci.yml ---------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "ci"
+    groups:
+      actions:
+        update-types:
+          - "minor"
+          - "patch"
