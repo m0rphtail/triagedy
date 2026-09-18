@@ -49,12 +49,25 @@ pub struct JevBackend {
     url: String,
     api_key: String,
     model: String,
-    questions: Value,
 }
 
 /// 429/529 are explicitly retryable per the TypeSafe API docs; retry with
 /// a short exponential backoff.
 const MAX_ATTEMPTS: usize = 3;
+
+/// The `state` field sent to TypeSafe. Without context it is exactly the raw
+/// alert (byte-identical to the pre-context behaviour, so the calibration
+/// benchmark stays comparable). With context, the alert is wrapped alongside
+/// the recent-activity window.
+fn build_state(alert: &Alert, context: Option<&TriageContext>) -> Value {
+    match context {
+        Some(c) if !c.is_empty() => json!({
+            "alert": alert.raw.clone(),
+            "recent_activity": &c.items,
+        }),
+        _ => alert.raw.clone(),
+    }
+}
 
 impl JevBackend {
     pub fn new(cfg: &BackendConfig) -> Result<Self, String> {
@@ -72,19 +85,19 @@ impl JevBackend {
             // Model resolution happens in the CLI; "jev-latest" is the default there.
             model: cfg.model.clone(),
             api_key,
-            questions: questions::typesafe_questions(false),
         })
     }
 
     pub async fn assess(
         &self,
         alert: &Alert,
-        _context: Option<&TriageContext>,
+        context: Option<&TriageContext>,
     ) -> Result<RawAnswers, String> {
+        let context = context.filter(|c| !c.is_empty());
         let body = json!({
-            "state": alert.raw,
+            "state": build_state(alert, context),
             "model": self.model,
-            "questions": self.questions,
+            "questions": questions::typesafe_questions(context.is_some()),
         });
 
         let mut last_err = String::new();
@@ -95,7 +108,7 @@ impl JevBackend {
                 ))
                 .await;
             }
-            match self.attempt(&body).await {
+            match self.attempt(&body, context.is_some()).await {
                 Ok(raw) => return Ok(raw),
                 Err((retryable, e)) => {
                     last_err = e;
@@ -109,7 +122,7 @@ impl JevBackend {
     }
 
     /// Returns `(retryable, error)`.
-    async fn attempt(&self, body: &Value) -> Result<RawAnswers, (bool, String)> {
+    async fn attempt(&self, body: &Value, has_context: bool) -> Result<RawAnswers, (bool, String)> {
         let resp = self
             .client
             .post(&self.url)
@@ -217,13 +230,22 @@ impl JevBackend {
             _ => return Err((false, "attack_class answer had wrong type".into())),
         };
 
+        let duplicate_of_recent = if has_context {
+            match take("duplicate_of_recent").map_err(|e| (false, e))? {
+                JevAnswer::Noul { noul } => Some(NoulAnswer { noul }),
+                _ => return Err((false, "duplicate_of_recent answer had wrong type".into())),
+            }
+        } else {
+            None
+        };
+
         Ok(RawAnswers {
             disposition: Some(disposition),
             severity: Some(severity),
             false_positive_probability: Some(fp),
             requires_escalation: Some(esc),
             attack_class: Some(attack),
-            duplicate_of_recent: None,
+            duplicate_of_recent,
         })
     }
 }
@@ -260,4 +282,38 @@ pub async fn doctor(cfg: &BackendConfig) -> Result<Vec<String>, String> {
         decision.attack_class,
     ));
     Ok(lines)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::{ContextItem, TriageContext};
+
+    fn ctx() -> TriageContext {
+        TriageContext {
+            items: vec![ContextItem {
+                id: "prev-1".into(),
+                host: Some("WS-1".into()),
+                rule: Some("r".into()),
+                action: Some("escalate".into()),
+                disposition: Some("escalate".into()),
+                attack_class: Some("execution".into()),
+                timestamp: Some("t0".into()),
+            }],
+        }
+    }
+
+    #[test]
+    fn state_is_the_raw_alert_without_context() {
+        let alert = crate::alert::parse_alert(r#"{"id":"a","rule":"r"}"#, 0).unwrap();
+        assert_eq!(build_state(&alert, None), alert.raw);
+    }
+
+    #[test]
+    fn state_wraps_alert_and_recent_activity_with_context() {
+        let alert = crate::alert::parse_alert(r#"{"id":"a","rule":"r"}"#, 0).unwrap();
+        let state = build_state(&alert, Some(&ctx()));
+        assert_eq!(state["alert"]["id"], "a");
+        assert_eq!(state["recent_activity"][0]["id"], "prev-1");
+    }
 }
