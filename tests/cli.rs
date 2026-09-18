@@ -184,3 +184,47 @@ fn summary_line_reports_counts() {
         "stderr was: {stderr}"
     );
 }
+
+#[test]
+fn context_file_is_honoured() {
+    let dir = std::env::temp_dir().join(format!("triagedy-cli-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ctx_path = dir.join("ctx.jsonl");
+    std::fs::write(
+        &ctx_path,
+        "{\"id\":\"prev-1\",\"host\":\"WS-1\",\"action\":\"escalate\",\"decision\":{\"disposition\":\"escalate\",\"attack_class\":\"execution\"}}\n",
+    )
+    .unwrap();
+
+    let (code, stdout, _) = run_cli(
+        &[
+            "run",
+            "--backend",
+            "mock",
+            "--quiet",
+            "--context",
+            ctx_path.to_str().unwrap(),
+        ],
+        "{\"id\":\"n1\"}\n",
+    );
+    assert_eq!(code, Some(0));
+    let rec: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert!(rec["decision"]["duplicate_probability"].is_number());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn missing_context_file_is_a_config_error() {
+    let (code, _stdout, stderr) = run_cli(
+        &[
+            "run",
+            "--backend",
+            "mock",
+            "--context",
+            "/nonexistent/ctx.jsonl",
+        ],
+        "{\"id\":\"n1\"}\n",
+    );
+    assert_eq!(code, Some(2));
+    assert!(stderr.contains("context file"), "stderr was: {stderr}");
+}
