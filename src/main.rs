@@ -69,22 +69,27 @@ struct ConvertArgs {
 
 #[derive(Args, Debug)]
 struct BackendArgs {
-    /// Backend to use
-    #[arg(long, default_value = "ollama", value_name = "mock|ollama|jev")]
+    /// Backend to use. `jev` (the default, TypeSafe System One) is the intended
+    /// path; `openai` is any OpenAI-compatible server (Ollama, OpenRouter,
+    /// vLLM, LM Studio…); `mock` is offline and deterministic.
+    #[arg(long, default_value = "jev", value_name = "jev|openai|mock")]
     backend: String,
-    /// Model name — whatever the backend serves: a local Ollama model sized to
-    /// this machine, an Ollama cloud model, or the Jev model. Falls back to the
-    /// TRIAGEDY_MODEL environment variable; no model is baked in.
+    /// Model name. Jev defaults to jev-latest; for `openai` pass whatever the
+    /// server serves (falls back to $TRIAGEDY_MODEL).
     #[arg(long)]
     model: Option<String>,
-    /// Ollama base URL
-    #[arg(long, default_value = "http://127.0.0.1:11434")]
-    ollama_url: String,
+    /// Base URL of the OpenAI-compatible API (used only with --backend openai)
+    #[arg(
+        long,
+        alias = "ollama-url",
+        default_value = "http://127.0.0.1:11434/v1"
+    )]
+    openai_url: String,
     /// TypeSafe System One endpoint
     #[arg(long, default_value = "https://api.typesafe.ai/v1/systemone")]
     typesafe_url: String,
-    /// TypeSafe API key (prefer `triagedy init`: flags are visible to other
-    /// processes). Falls back to $TYPESAFE_API_KEY, then the stored key file.
+    /// API key for the selected backend (Jev: prefer `triagedy init`).
+    /// Falls back to $TYPESAFE_API_KEY (jev) or $OPENAI_API_KEY (openai).
     #[arg(long)]
     api_key: Option<String>,
     /// Per-request timeout, seconds
@@ -137,25 +142,35 @@ fn resolve_model(args: &BackendArgs, kind: BackendKind) -> Result<String, String
     match kind {
         BackendKind::Mock => Ok("mock".to_string()),
         BackendKind::Jev => Ok("jev-latest".to_string()),
-        BackendKind::Ollama => Err(
-            "no model selected: pass --model <name> — any model the Ollama server serves, \
-             local or cloud — or set TRIAGEDY_MODEL (`ollama list` shows local models)"
+        BackendKind::OpenAi => Err(
+            "no model selected: pass --model <name> — any model the OpenAI-compatible \
+             server serves, local or remote — or set TRIAGEDY_MODEL"
                 .to_string(),
         ),
     }
 }
 
 fn backend_config(args: &BackendArgs, kind: BackendKind) -> Result<BackendConfig, String> {
-    Ok(BackendConfig {
-        kind,
-        model: resolve_model(args, kind)?,
-        ollama_url: args.ollama_url.clone(),
-        typesafe_url: args.typesafe_url.clone(),
-        api_key: args
+    // Per-kind key resolution: an OPENAI_API_KEY in the environment is never
+    // sent to api.typesafe.ai, and the TypeSafe key never goes to a local server.
+    let api_key = match kind {
+        BackendKind::Jev => args
             .api_key
             .clone()
             .or_else(|| std::env::var("TYPESAFE_API_KEY").ok())
             .or_else(|| config::load_key_from(&config::key_file())),
+        BackendKind::OpenAi => args
+            .api_key
+            .clone()
+            .or_else(|| std::env::var("OPENAI_API_KEY").ok()),
+        BackendKind::Mock => None,
+    };
+    Ok(BackendConfig {
+        kind,
+        model: resolve_model(args, kind)?,
+        openai_url: args.openai_url.clone(),
+        typesafe_url: args.typesafe_url.clone(),
+        api_key,
         timeout_secs: args.timeout_secs,
     })
 }
@@ -324,7 +339,7 @@ async fn cmd_doctor(args: DoctorArgs) -> anyhow::Result<i32> {
             "mock backend: offline and deterministic; nothing to check".to_string(),
             "usage: triagedy run --backend mock < alerts.jsonl".to_string(),
         ]),
-        BackendKind::Ollama => backends::ollama::doctor(&cfg).await,
+        BackendKind::OpenAi => backends::openai::doctor(&cfg).await,
         BackendKind::Jev => backends::jev::doctor(&cfg).await,
     };
 

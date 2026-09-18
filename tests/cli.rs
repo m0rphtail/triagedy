@@ -121,17 +121,19 @@ fn ollama_without_a_model_is_a_config_error() {
 }
 
 #[test]
-fn ollama_model_can_come_from_the_environment() {
+fn openai_model_can_come_from_the_environment() {
     // TRIAGEDY_MODEL is honored: the run gets past model resolution and fails
     // at the transport instead (port 1 on loopback is closed), which is the
     // proof that a model name was accepted without any model being pinned.
+    // The legacy `--backend ollama` alias and `--ollama-url` alias both route
+    // to the OpenAI-compatible backend.
     let out = Command::new(triagedy_bin())
         .args([
             "run",
             "--backend",
             "ollama",
             "--ollama-url",
-            "http://127.0.0.1:1",
+            "http://127.0.0.1:1/v1",
             "--quiet",
         ])
         .env("TRIAGEDY_MODEL", "any-model-local-or-cloud")
@@ -159,7 +161,7 @@ fn ollama_model_can_come_from_the_environment() {
         record["error"]
             .as_str()
             .expect("error string")
-            .contains("ollama"),
+            .contains("openai"),
         "record was: {record}"
     );
 }
@@ -219,6 +221,97 @@ fn convert_pipeline_into_run() {
     assert_eq!(rec["ok"], true);
     assert_eq!(rec["id"], "hostZ-7");
     assert!(rec["decision"].is_object());
+}
+
+/// Isolation for the `jev`-default tests: point XDG_CONFIG_HOME at an empty
+/// temp dir so the real stored key is invisible, and drop both key env vars.
+/// Without this, `triagedy run` with the new default would fire a live API call.
+fn isolated_command(args: &[&str], stdin: &str) -> std::process::Output {
+    let empty = std::env::temp_dir().join(format!(
+        "triagedy-nokey-{}-{}",
+        std::process::id(),
+        args.join("_").replace('/', "-")
+    ));
+    std::fs::create_dir_all(&empty).unwrap();
+    let out = Command::new(triagedy_bin())
+        .args(args)
+        .env("XDG_CONFIG_HOME", &empty)
+        .env_remove("TYPESAFE_API_KEY")
+        .env_remove("OPENAI_API_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|mut c| {
+            c.stdin.take().expect("stdin").write_all(stdin.as_bytes())?;
+            c.wait_with_output()
+        })
+        .expect("run");
+    std::fs::remove_dir_all(&empty).ok();
+    out
+}
+
+#[test]
+fn default_backend_is_jev_and_asks_for_a_key() {
+    let out = isolated_command(&["run", "--quiet"], "{\"id\":\"a\"}\n");
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("triagedy init"), "stderr was: {stderr}");
+}
+
+#[test]
+fn legacy_backend_name_ollama_routes_to_openai() {
+    let out = isolated_command(
+        &["run", "--backend", "ollama", "--quiet"],
+        "{\"id\":\"a\"}\n",
+    );
+    // Routes to the openai backend, which demands a model (exit 2, not
+    // "unknown backend").
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no model selected"), "stderr was: {stderr}");
+    assert!(!stderr.contains("unknown backend"), "stderr was: {stderr}");
+}
+
+#[test]
+fn openai_backend_doctor_reports_an_unreachable_endpoint() {
+    let out = Command::new(triagedy_bin())
+        .args([
+            "doctor",
+            "--backend",
+            "openai",
+            "--model",
+            "x",
+            "--openai-url",
+            "http://127.0.0.1:1/v1",
+        ])
+        .output()
+        .expect("run");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot reach"));
+}
+
+#[test]
+fn jev_is_the_default_backend_in_help() {
+    let out = Command::new(triagedy_bin())
+        .args(["run", "--help"])
+        .output()
+        .expect("help");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("jev|openai|mock"),
+        "help should show the new backend set: {text}"
+    );
+    assert!(
+        text.contains("[default: jev]"),
+        "jev must be documented as the default: {text}"
+    );
+    assert!(
+        text.contains("--openai-url"),
+        "the openai fallback URL flag must be documented: {text}"
+    );
+    // `--ollama-url` is an accepted alias but clap does not print aliases in
+    // help; its functionality is covered by legacy_backend_name_ollama_routes_to_openai.
 }
 
 #[test]

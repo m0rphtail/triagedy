@@ -2,7 +2,7 @@
 //!
 //! These are defined once and consumed two ways:
 //! - as TypeSafe "System One" questions (Choice / Score / Noul) for the `jev` backend
-//! - rendered into a plain-text prompt + JSON schema for the `ollama` backend
+//! - rendered into a plain-text prompt + JSON schema for the `openai` backend
 
 use crate::alert::Alert;
 use crate::context::TriageContext;
@@ -67,8 +67,8 @@ pub fn typesafe_questions(with_context: bool) -> Value {
     questions
 }
 
-/// The JSON schema the `ollama` backend constrains generation to.
-pub fn ollama_format_schema(with_context: bool) -> Value {
+/// The JSON schema the `openai` backend constrains generation to.
+pub fn chat_schema(with_context: bool) -> Value {
     let mut schema = json!({
         "type": "object",
         "properties": {
@@ -108,7 +108,7 @@ pub fn ollama_format_schema(with_context: bool) -> Value {
 const MAX_STATE_CHARS: usize = 8_000;
 
 /// Render the prompt for an LLM asked to answer the same five questions.
-pub fn ollama_prompt(alert: &Alert, context: Option<&TriageContext>) -> String {
+pub fn chat_prompt(alert: &Alert, context: Option<&TriageContext>) -> String {
     let mut state = alert.raw.to_string();
     if state.chars().count() > MAX_STATE_CHARS {
         state = format!(
@@ -204,10 +204,10 @@ mod tests {
     }
 
     #[test]
-    fn ollama_schema_gains_duplicate_only_with_context() {
-        let without = ollama_format_schema(false);
+    fn chat_schema_gains_duplicate_only_with_context() {
+        let without = chat_schema(false);
         assert!(without["properties"].get("duplicate_of_recent").is_none());
-        let with = ollama_format_schema(true);
+        let with = chat_schema(true);
         assert!(with["properties"]["duplicate_of_recent"]["type"] == "number");
         let required = with["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "duplicate_of_recent"));
