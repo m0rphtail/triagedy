@@ -23,8 +23,16 @@ pub struct Alert {
     pub raw: Value,
 }
 
-const ID_KEYS: [&str; 5] = ["id", "alert_id", "alertId", "_id", "event_id"];
-const RULE_KEYS: [&str; 7] = [
+const ID_KEYS: [&str; 7] = [
+    "id",
+    "alert_id",
+    "alertId",
+    "_id",
+    "event_id",
+    "event.id",
+    "event_record_id",
+];
+const RULE_KEYS: [&str; 11] = [
     "rule",
     "rule_name",
     "ruleName",
@@ -32,41 +40,87 @@ const RULE_KEYS: [&str; 7] = [
     "title",
     "event_type",
     "name",
+    "rule.name",
+    "event.action",
+    "event_simpleName",
+    "DetectDescription",
 ];
 const SEVERITY_KEYS: [&str; 3] = ["severity", "level", "priority"];
-const HOST_KEYS: [&str; 5] = ["host", "hostname", "computer", "device", "endpoint"];
-const USER_KEYS: [&str; 5] = ["user", "username", "account", "userName", "src_user"];
-const PROCESS_KEYS: [&str; 5] = ["process", "process_name", "image", "proc", "exe"];
-const CMDLINE_KEYS: [&str; 4] = ["command_line", "commandLine", "cmdline", "command"];
-const PARENT_KEYS: [&str; 5] = [
+const HOST_KEYS: [&str; 7] = [
+    "host",
+    "hostname",
+    "computer",
+    "device",
+    "endpoint",
+    "host.name",
+    "ComputerName",
+];
+const USER_KEYS: [&str; 7] = [
+    "user",
+    "username",
+    "account",
+    "userName",
+    "src_user",
+    "user.name",
+    "UserName",
+];
+const PROCESS_KEYS: [&str; 8] = [
+    "process",
+    "process_name",
+    "image",
+    "proc",
+    "exe",
+    "process.name",
+    "ImageFileName",
+    "FileName",
+];
+const CMDLINE_KEYS: [&str; 6] = [
+    "command_line",
+    "commandLine",
+    "cmdline",
+    "command",
+    "process.command_line",
+    "CommandLine",
+];
+const PARENT_KEYS: [&str; 8] = [
     "parent_process",
     "parentProcess",
     "parent_image",
     "parentProcessName",
     "parent",
+    "process.parent.name",
+    "ParentBaseFileName",
+    "ParentImage",
 ];
-const SRC_IP_KEYS: [&str; 6] = [
+const SRC_IP_KEYS: [&str; 8] = [
     "src_ip",
     "source_ip",
     "srcip",
     "sourceIp",
     "src",
     "sourceAddress",
+    "source.ip",
+    "SourceIp",
 ];
-const DST_IP_KEYS: [&str; 6] = [
+const DST_IP_KEYS: [&str; 8] = [
     "dst_ip",
     "destination_ip",
     "dstip",
     "dest_ip",
     "dst",
     "destinationAddress",
+    "destination.ip",
+    "DestinationIp",
 ];
-const TS_KEYS: [&str; 5] = [
+const TS_KEYS: [&str; 8] = [
     "timestamp",
     "time",
     "@timestamp",
     "event_time",
     "created_at",
+    "event.created",
+    "UtcTime",
+    "ContextTimeStamp",
 ];
 
 /// Parse one JSONL line into an `Alert`. `idx` is the 0-based index of the
@@ -115,12 +169,16 @@ fn get(v: &Value, keys: &[&str]) -> Option<String> {
     None
 }
 
+/// Literal key first (flat exports like `"rule.name"`), then a dotted-path
+/// walk into nested objects. Both ECS shapes therefore resolve.
 fn lookup<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
-    if let Some((head, tail)) = key.split_once('.') {
-        v.get(head).and_then(|inner| lookup(inner, tail))
-    } else {
-        v.get(key)
+    if let Some(found) = v.get(key) {
+        return Some(found);
     }
+    if let Some((head, tail)) = key.split_once('.') {
+        return v.get(head).and_then(|inner| lookup(inner, tail));
+    }
+    None
 }
 
 #[cfg(test)]
@@ -154,6 +212,41 @@ mod tests {
         assert_eq!(a.rule.as_deref(), Some("bare"));
         assert!(a.host.is_none());
         assert!(a.timestamp.is_none());
+    }
+
+    #[test]
+    fn resolves_flat_dotted_keys_like_ecs_exports() {
+        let line = r#"{"event.id":"e1","rule.name":"Brute force","host.name":"web-01","user.name":"svc","source.ip":"203.0.113.9","@timestamp":"2026-09-18T00:00:00Z"}"#;
+        let a = parse_alert(line, 0).unwrap();
+        assert_eq!(a.id, "e1");
+        assert_eq!(a.rule.as_deref(), Some("Brute force"));
+        assert_eq!(a.host.as_deref(), Some("web-01"));
+        assert_eq!(a.user.as_deref(), Some("svc"));
+        assert_eq!(a.src_ip.as_deref(), Some("203.0.113.9"));
+    }
+
+    #[test]
+    fn resolves_nested_ecs_documents() {
+        let line = r#"{"@timestamp":"2026-09-18T00:00:00Z","event":{"id":"e2"},"rule":{"name":"Suspicious login"},"host":{"name":"vpn-gw"},"process":{"name":"sshd","command_line":"sshd -D"}}"#;
+        let a = parse_alert(line, 0).unwrap();
+        assert_eq!(a.id, "e2");
+        assert_eq!(a.rule.as_deref(), Some("Suspicious login"));
+        assert_eq!(a.host.as_deref(), Some("vpn-gw"));
+        assert_eq!(a.process.as_deref(), Some("sshd"));
+    }
+
+    #[test]
+    fn parses_crowdstrike_fdr_style_event() {
+        let line = r#"{"event_simpleName":"ProcessRollup2","ComputerName":"FIN-WS-04","UserName":"CORP\\m.iyer","ImageFileName":"\\Device\\HarddiskVolume2\\Windows\\System32\\cmd.exe","CommandLine":"cmd.exe /c whoami","ParentBaseFileName":"explorer.exe","SourceIp":"10.20.4.51","DestinationIp":"45.155.205.233","ContextTimeStamp":"1758100000.123"}"#;
+        let a = parse_alert(line, 0).unwrap();
+        assert_eq!(a.rule.as_deref(), Some("ProcessRollup2"));
+        assert_eq!(a.host.as_deref(), Some("FIN-WS-04"));
+        assert_eq!(a.user.as_deref(), Some("CORP\\m.iyer"));
+        assert_eq!(a.command_line.as_deref(), Some("cmd.exe /c whoami"));
+        assert_eq!(a.parent_process.as_deref(), Some("explorer.exe"));
+        assert_eq!(a.src_ip.as_deref(), Some("10.20.4.51"));
+        assert_eq!(a.dst_ip.as_deref(), Some("45.155.205.233"));
+        assert_eq!(a.timestamp.as_deref(), Some("1758100000.123"));
     }
 
     #[test]
