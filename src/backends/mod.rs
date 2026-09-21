@@ -41,6 +41,12 @@ impl BackendKind {
             Self::Jev => "jev",
         }
     }
+
+    /// Whether this backend produces calibrated probabilities (Jev)
+    /// vs uncalibrated model self-reports (OpenAI fallback / mock).
+    pub fn is_calibrated(&self) -> bool {
+        matches!(self, Self::Jev)
+    }
 }
 
 /// Backend configuration, gathered from CLI flags.
@@ -86,5 +92,33 @@ impl Backends {
             Self::OpenAi(b) => b.assess(alert, context).await,
             Self::Jev(b) => b.assess(alert, context).await,
         }
+    }
+
+    /// Whether this backend produces calibrated probabilities (Jev)
+    /// vs uncalibrated model self-reports (OpenAI fallback / mock).
+    pub fn is_calibrated(&self) -> bool {
+        matches!(self, Self::Jev(_))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_kind_calibration_status() {
+        assert!(BackendKind::Jev.is_calibrated());
+        assert!(!BackendKind::OpenAi.is_calibrated());
+        assert!(!BackendKind::Mock.is_calibrated());
+    }
+
+    #[test]
+    fn backend_kind_parsing() {
+        assert_eq!(BackendKind::parse("jev").unwrap(), BackendKind::Jev);
+        assert_eq!(BackendKind::parse("typesafe").unwrap(), BackendKind::Jev);
+        assert_eq!(BackendKind::parse("openai").unwrap(), BackendKind::OpenAi);
+        assert_eq!(BackendKind::parse("ollama").unwrap(), BackendKind::OpenAi);
+        assert_eq!(BackendKind::parse("mock").unwrap(), BackendKind::Mock);
+        assert!(BackendKind::parse("unknown").is_err());
     }
 }

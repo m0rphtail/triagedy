@@ -9,7 +9,7 @@
 use crate::alert::Alert;
 use crate::backends::Backends;
 use crate::decision::Decision;
-use crate::policy::{Action, Assessment, assess as route};
+use crate::policy::{Action, Assessment, assess_with_calibration as route};
 use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use std::io::{BufRead, Write};
@@ -33,6 +33,10 @@ pub struct OutputRecord {
     pub ok: bool,
     pub backend: String,
     pub model: String,
+    /// Whether confidence values in this record represent calibrated probabilities
+    /// (true for Jev) vs subjective self-reports (false for OpenAI-compatible / mock).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence_calibrated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,10 +152,19 @@ async fn process_line(
         }
     };
 
+    let calibrated = backend.is_calibrated();
     match Decision::from_answers(&raw) {
         Ok(decision) => {
-            let assessment = route(&decision);
-            ok_record(idx, &alert, backend_name, model, decision, assessment)
+            let assessment = route(&decision, calibrated);
+            ok_record(
+                idx,
+                &alert,
+                backend_name,
+                model,
+                calibrated,
+                decision,
+                assessment,
+            )
         }
         Err(e) => err_record(
             idx,
@@ -169,6 +182,7 @@ fn ok_record(
     alert: &Alert,
     backend_name: &str,
     model: &str,
+    calibrated: bool,
     decision: Decision,
     assessment: Assessment,
 ) -> OutputRecord {
@@ -178,6 +192,7 @@ fn ok_record(
         ok: true,
         backend: backend_name.to_string(),
         model: model.to_string(),
+        confidence_calibrated: Some(calibrated),
         rule: alert.rule.clone(),
         severity: alert.severity.clone(),
         host: alert.host.clone(),
@@ -211,6 +226,7 @@ fn err_record(
         ok: false,
         backend: backend_name.to_string(),
         model: model.to_string(),
+        confidence_calibrated: None,
         rule,
         severity: None,
         host: None,

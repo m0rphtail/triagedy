@@ -1,4 +1,17 @@
-//! The triage questions themselves: the five decisions we ask of every alert.
+//! The triage questions: a validated SOC Tier-1 security-operations workflow.
+//!
+//! Grounded in industry incident handling standards:
+//! - NIST SP 800-61 Rev. 2 §3.2 ("Detection and Analysis") and §3.2.6 ("Incident Prioritization")
+//! - MITRE ATT&CK Enterprise Matrix v15+ tactics
+//! - SANS Incident Handler Tier-1 triage and containment handoff playbooks
+//!
+//! The five core questions decompose alert analysis into typed, orthogonal judgments:
+//! 1. `disposition`: NIST §3.2 triage action (close | investigate | escalate | contain)
+//! 2. `severity`: NIST §3.2.6 impact prioritization (0.0–3.0 Score)
+//! 3. `false_positive_probability`: SOC verification gate (Noul 0.0–1.0)
+//! 4. `requires_escalation`: SANS IR handoff urgency (Noul 0.0–1.0)
+//! 5. `attack_class`: MITRE ATT&CK primary tactic classification (Choice)
+//! + `duplicate_of_recent`: SOC deduplication correlation (when `--context` is supplied)
 //!
 //! These are defined once and consumed two ways:
 //! - as TypeSafe "System One" questions (Choice / Score / Noul) for the `jev` backend

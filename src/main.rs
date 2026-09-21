@@ -344,7 +344,14 @@ async fn cmd_doctor(args: DoctorArgs) -> anyhow::Result<i32> {
     };
 
     match lines {
-        Ok(lines) => {
+        Ok(mut lines) => {
+            if kind.is_calibrated() {
+                lines.push(
+                    "confidence calibration: calibrated probabilities (System One)".to_string(),
+                );
+            } else {
+                lines.push("confidence calibration: uncalibrated model self-report".to_string());
+            }
             for l in lines {
                 println!("{l}");
             }

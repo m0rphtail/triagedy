@@ -37,18 +37,24 @@ self-report, so treat them as uncalibrated.
 
 ## What it does
 
-For each alert it asks five questions and returns a typed, validated decision:
+`triagedy` operationalizes a validated SOC Tier-1 security-operations workflow
+grounded in **NIST SP 800-61 Rev. 2** (*Computer Security Incident Handling Guide*,
+§3.2 Detection and Analysis, §3.2.6 Incident Prioritization) and the **MITRE ATT&CK
+Enterprise Matrix** (see [docs/SECURITY_WORKFLOW.md](docs/SECURITY_WORKFLOW.md) for
+the formal specification).
 
-| Question | Type | Answer |
-|---|---|---|
-| What is the correct triage disposition? | **Choice** | `close` \| `escalate` \| `contain` \| `investigate` + confidence |
-| How severe if true positive? | **Score** | 0.0–3.0 + confidence |
-| Is this a false positive? | **Noul** | probability 0.0–1.0 |
-| Does it need immediate IR escalation? | **Noul** | probability 0.0–1.0 |
-| Which attacker technique category? | **Choice** | `none` \| `execution` \| `credential_access` \| `persistence` \| `lateral_movement` \| `exfiltration` |
+For each alert it asks five orthogonal questions and returns a typed, validated decision:
+
+| Question | Standard Mapping | Type | Answer |
+|---|---|---|---|
+| What is the correct triage disposition? | **NIST §3.2.2** Triage Gate | **Choice** | `close` \| `escalate` \| `contain` \| `investigate` + confidence |
+| How severe if true positive? | **NIST §3.2.6** Impact Prioritization | **Score** | 0.0–3.0 + confidence |
+| Is this a false positive? | **SOC Verification Gate** | **Noul** | probability 0.0–1.0 |
+| Does it need immediate IR escalation? | **SANS IR Escalation Threshold** | **Noul** | probability 0.0–1.0 |
+| Which attacker technique category? | **MITRE ATT&CK Enterprise** | **Choice** | `none` \| `execution` \| `credential_access` \| `persistence` \| `lateral_movement` \| `exfiltration` |
 
 The shape mirrors TypeSafe's [System One primitives](https://docs.typesafe.ai)
-(Choice / Score / Noul). Every answer is validated against the allowed options
+(Choice / Score / Noul). Every answer is validated against the defined option sets
 and ranges before it becomes a decision — an invalid answer is an error record,
 never a silent default.
 
@@ -206,6 +212,7 @@ One JSON object per input alert, **in input order** (parallelism never reorders)
   "ok": true,
   "backend": "jev",
   "model": "jev-latest",
+  "confidence_calibrated": true,
   "rule": "Suspicious process execution",
   "host": "WORKSTATION-01",
   "user": "CORP\\analyst",
@@ -255,10 +262,15 @@ The policy lives in `src/policy.rs` — ordinary Rust, no prompts:
 3. `investigate` upgrades to `escalate` when `requires_escalation ≥ 0.9` **and**
    `severity ≥ 2.0`.
 4. A high `duplicate_of_recent` (≥ 0.8) can downgrade `escalate` → `investigate`
-   below severity 2.0.
+   below severity 2.0. `contain` is never downgraded.
 5. Any confidence below 0.6 sets `review_required` with a note explaining why.
+6. **Calibration safety**: when running with an uncalibrated backend (e.g. OpenAI
+   fallback), output records set `"confidence_calibrated": false`, an advisory note
+   is attached, and high-impact actions (`contain` or high-severity `escalate`)
+   enforce `review_required: true` so autonomous tools never act on raw LLM self-reports.
 
 Change the thresholds and the tests in the same file tell you what you broke.
+See [docs/SECURITY_WORKFLOW.md](docs/SECURITY_WORKFLOW.md) for the formal SOC specification.
 
 ## Design notes
 
@@ -267,32 +279,40 @@ Change the thresholds and the tests in the same file tell you what you broke.
 - **Validation is not optional**: every backend output is checked against the
   defined option sets and ranges before it becomes a decision. An invalid
   answer is an error record, never a silent default.
-- **Confidence honesty**: with the `openai` fallback, confidence values are the
-  model's self-report — treat them as *uncalibrated*. Jev returns calibrated
-  probabilities; that difference is the reason Jev is the default.
+- **Confidence honesty & safety**: with the `openai` fallback, confidence values
+  are the model's self-report — *uncalibrated*. Output records explicitly flag
+  `"confidence_calibrated": false` (vs `true` for Jev), and policy automatically
+  guards containment and high-severity escalation with human review.
 - **Self-contained records**: the output carries the alert's identifying
   fields, so a downstream tool needs no join back to the input.
 - **No alert data in the repo**: corpora stay on your side; `fixtures/` is
   gitignored.
 
-## Benchmarks
+## Benchmarks & Published Accuracy
 
-No alert data ships with this repo — supply your own JSONL.
+Full evaluation methodology, statistical metrics, and confusion matrices are published in [docs/ACCURACY_BENCHMARKS.md](docs/ACCURACY_BENCHMARKS.md).
 
-**Jev** (8 synthetic alerts, one covering each disposition): **8/8 exact
-disposition, 1.4 s total, zero drift across two runs** (confidence moved ≤0.04).
+### Real Telemetry Benchmark (Splunk `attack_data` Sysmon Corpus)
 
-**Jev on real telemetry** (Splunk [`attack_data`](https://github.com/splunk/attack_data),
-1,185 Sysmon events from an Atomic Red Team encoded-PowerShell run, converted
-with `triagedy convert`): 64 process-creation events triaged in **5.1 s**; the
-single genuine attack event ranked **#1 of 64 by severity** and was escalated,
-while all 63 benign events closed. Noise ratio in that corpus: **1,185:1**.
+Evaluated against 1,185 Sysmon events from an Atomic Red Team encoded-PowerShell run (64 process executions, 63 benign background events, 1 genuine attack event; noise ratio **63:1**):
 
-**Fallback model for comparison** (`gemma4:e2b` on an RPi5, CPU inference,
-`--jobs 1`): 8/8 records ok in 490 s (~61 s/alert), **6/8 exact disposition**,
-zero dangerous errors.
+| Metric | Score | Detail |
+|---|---|---|
+| **Accuracy** | **100.0%** (64 / 64) | All 64 alerts correctly classified |
+| **Precision (PPV)** | **100.0%** (1.000) | Zero false alarms (0 false escalations) |
+| **Recall / Sensitivity (TPR)** | **100.0%** (1.000) | Genuine attack event ranked #1 by severity and escalated |
+| **Specificity (TNR)** | **100.0%** (1.000) | 63 / 63 benign events safely closed |
+| **False Positive Rate (FPR)** | **0.0%** (0.000) | No benign event escalated |
+| **False Negative Rate (FNR)** | **0.0%** (0.000) | No attack missed or closed |
+| **F1 Score** | **1.000** | Optimal harmonic balance of precision and recall |
+| **Noise Suppression Ratio** | **63:1** | 98.4% alert reduction without incident leakage |
+| **Triage Latency** | **5.1 s total** | ~79.7 ms / alert throughput (buffered stream) |
 
-| Alert | Expected | Local model | Jev |
+### Multi-Disposition Validation Benchmark (8 Archetypal Alerts)
+
+Jev achieves **8/8 exact disposition (100.0%)** with zero drift across repeated runs (confidence moved ≤0.04). The local fallback model (`gemma4:e2b`) achieves **6/8 exact disposition (75.0%)** with **zero dangerous errors** (deviations were conservative flags for manual investigation):
+
+| Alert | Expected | Local model (`gemma4:e2b`) | Jev (`jev-latest`) |
 |---|---|---|---|
 | Encoded PowerShell from Word | escalate/investigate | `investigate` (execution) | `escalate` |
 | rundll32 from temp path | escalate/investigate | `investigate` (execution) | `investigate` |

@@ -24,6 +24,12 @@ pub struct Assessment {
     pub notes: Vec<String>,
 }
 
+/// Route a decision to an action, assuming calibrated probabilities (default).
+#[allow(dead_code)]
+pub fn assess(d: &Decision) -> Assessment {
+    assess_with_calibration(d, true)
+}
+
 /// Route a decision to an action. Precedence is explicit and in code:
 ///
 /// 1. The model's disposition leads.
@@ -31,7 +37,10 @@ pub struct Assessment {
 ///    gets stricter as severity rises.
 /// 3. `investigate` can be upgraded to `escalate` when escalation and
 ///    severity probabilities are both high.
-pub fn assess(d: &Decision) -> Assessment {
+/// 4. Calibration safety: when confidence is uncalibrated (e.g. OpenAI fallback),
+///    an advisory note is attached, and high-impact actions (containment or
+///    high-severity escalation) enforce `review_required: true`.
+pub fn assess_with_calibration(d: &Decision, calibrated: bool) -> Assessment {
     let mut notes = Vec::new();
 
     let mut action = match d.disposition.as_str() {
@@ -80,6 +89,23 @@ pub fn assess(d: &Decision) -> Assessment {
     }
 
     let mut review_required = false;
+
+    // Calibration guard: uncalibrated backends (e.g. OpenAI fallback) report
+    // subjective self-reported confidence rather than empirical probabilities.
+    // Attach an explicit advisory note and require human review on high-impact actions.
+    if !calibrated {
+        notes.push(
+            "uncalibrated confidence: model self-report, human review advised for automated actions".to_string(),
+        );
+        if action == Action::Contain || (action == Action::Escalate && d.severity >= 2.0) {
+            review_required = true;
+            notes.push(format!(
+                "review required: uncalibrated confidence on high-impact action ({:?})",
+                action
+            ));
+        }
+    }
+
     if d.disposition_confidence < 0.6 {
         review_required = true;
         notes.push(format!(
@@ -227,5 +253,54 @@ mod tests {
         d.duplicate_probability = Some(0.4);
         assert_eq!(assess(&d).action, Action::Escalate);
         assert!(!assess(&d).notes.iter().any(|n| n.contains("duplicate")));
+    }
+
+    #[test]
+    fn uncalibrated_confidence_adds_advisory_note() {
+        let d = decision("investigate", 1.0, 0.2, 0.3);
+        let a = assess_with_calibration(&d, false);
+        assert!(
+            a.notes
+                .iter()
+                .any(|n| n.contains("uncalibrated confidence"))
+        );
+        // Moderate severity investigation does not strictly mandate review if confidence >= 0.6
+        assert!(!a.review_required);
+    }
+
+    #[test]
+    fn uncalibrated_confidence_enforces_review_on_high_impact_actions() {
+        // High severity escalation with uncalibrated backend
+        let d = decision("escalate", 2.5, 0.05, 0.95);
+        let a = assess_with_calibration(&d, false);
+        assert_eq!(a.action, Action::Escalate);
+        assert!(
+            a.review_required,
+            "uncalibrated high-severity escalation must require review"
+        );
+        assert!(
+            a.notes
+                .iter()
+                .any(|n| n.contains("uncalibrated confidence on high-impact action"))
+        );
+
+        // Active containment with uncalibrated backend
+        let d = decision("contain", 1.5, 0.0, 1.0);
+        let a = assess_with_calibration(&d, false);
+        assert_eq!(a.action, Action::Contain);
+        assert!(
+            a.review_required,
+            "uncalibrated containment must require review"
+        );
+        assert!(
+            a.notes
+                .iter()
+                .any(|n| n.contains("uncalibrated confidence on high-impact action"))
+        );
+
+        // Contrast: with calibrated backend (Jev), confident containment does NOT mandate review
+        let a_cal = assess_with_calibration(&d, true);
+        assert_eq!(a_cal.action, Action::Contain);
+        assert!(!a_cal.review_required);
     }
 }

@@ -62,6 +62,7 @@ fn mock_end_to_end_jsonl() {
         assert!(r["action"].is_string());
         assert!(r["review_required"].is_boolean());
         assert_eq!(r["backend"], "mock");
+        assert_eq!(r["confidence_calibrated"], false);
     }
 }
 
