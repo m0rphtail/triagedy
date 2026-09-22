@@ -5,6 +5,8 @@
 ![ci](https://github.com/m0rphtail/triagedy/actions/workflows/ci.yml/badge.svg)
 ![license](https://img.shields.io/badge/license-MIT-blue.svg)
 
+![triagedy: alert triage as a UNIX filter](docs/assets/banner.png)
+
 **Alert triage as a UNIX filter: JSONL security alerts in, typed decisions out.**
 
 Powered by [TypeSafe Jev](https://typesafe.ai) (System One) by default — typed
@@ -57,6 +59,8 @@ The shape mirrors TypeSafe's [System One primitives](https://docs.typesafe.ai)
 (Choice / Score / Noul). Every answer is validated against the defined option sets
 and ranges before it becomes a decision — an invalid answer is an error record,
 never a silent default.
+
+![triagedy decision flow](docs/assets/pipeline.png)
 
 ---
 
